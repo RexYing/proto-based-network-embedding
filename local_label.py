@@ -76,7 +76,7 @@ def receptive_field_candidates(G, node, k):
     
 
 if __name__ == '__main__':
-  G = readgraph.read_adjlist_undir('../data/ca-GrQc.txt')
+  G = readgraph.read_adjlist_undir('data/ca-GrQc.txt')
 
   node = G.nodes()[0]
   print('node : %s' % node)
