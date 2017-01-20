@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
 import readgraph
 
 # (2^i)-th prime
@@ -30,17 +31,19 @@ def wl_color_refinement(G, labels):
   Args:
     G: input graph.
     labels: List of labels for nodes in G, ordered according to G.nodes().
-  """
-  num_alph = len(labels)
 
-  prime_upper = primes_arguments_required[np.ceil(np.log2(num_alph))]
+  Returns:
+    labels: Refined labels
+  """
+  num_nodes = len(labels)
+
+  prime_upper = primes_arguments_required[int(np.ceil(np.log2(num_nodes)))]
   logplist = np.log2(primes(prime_upper))
 
   adjmat = nx.adjacency_matrix(G)
-  signatures = np.round(labels + adjmat.dot(logplist), decimals=10)
+  signatures = np.round(labels + adjmat.dot([logplist[i] for i in labels]), decimals=10)
   _, newlabels = np.unique(signatures, return_inverse=True)
-  print(signatures)
-  print(newlabels)
+  return newlabels
 
 def wl(G, labels=[]):
   """ Label local neighborhood with WL (Weisfeiler-Lehman) algorithm.
@@ -50,37 +53,15 @@ def wl(G, labels=[]):
     G: input local neighborhood.
 
   Returns:
-    G with labels
+    labels: list of (refined) labels
   """
   if not labels:
     labels = [1] * len(G.nodes())
+  prev_labels = []
+  while np.any(prev_labels != labels):
+    prev_labels = labels
+    labels = wl_color_refinement(G, labels)
+    print(labels)
 
-
-def receptive_field_candidates(G, node, k):
-  """ Return candidates of CNN receptive field using bfs.
-
-  Args:
-    node: source node whose neighborhood needs to be constructed.
-    k: receptive field size.
-
-  Returns:
-    candidates: a list of node IDs that are candidates for receptive field
-  """
-  candidates = [node]
-  idx = 0;
-  while (len(candidates) < k):
-    l = len(candidates)
-    for i in range(idx, l):
-      candidates.extend(G.neighbors(candidates[i]))
-  return candidates 
-    
-
-if __name__ == '__main__':
-  G = readgraph.read_adjlist_undir('data/ca-GrQc.txt')
-
-  node = G.nodes()[0]
-  print('node : %s' % node)
-  candidates = receptive_field_candidates(G, node, 10)
-  print('candidates : %s' % candidates) 
-  nx.draw(G.subgraph(candidates))
+  return labels
 
