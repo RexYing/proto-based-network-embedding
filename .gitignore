@@ -5,6 +5,10 @@ __pycache__/
 
 # C extensions
 *.so
+*.a
+*.o
+!nauty26r7/nauty.a
+nauty26r7/build/
 
 # Distribution / packaging
 .Python
