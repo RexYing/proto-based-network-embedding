@@ -62,7 +62,7 @@ dnl Checks for C compiler and sets CFLAGS if not set by user
 user_cflags="$CFLAGS"
 AC_PROG_CC
 CFLAGS=$user_cflags
-MORECFLAGS=""
+MORECFLAGS="-fPIC"
 dnl  we need  AC_SYS_LARGEFILE and AC_FUNC_FSEEKO
 AC_SYS_LARGEFILE
 AS_IF([test x"$ac_cv_sys_file_offset_bits" = xno],[ac_cv_sys_file_offset_bits=0],[])

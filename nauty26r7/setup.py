@@ -9,6 +9,7 @@ os.environ['OPT'] = " ".join(
 
 nautymodule = Extension('nauty', 
                         extra_objects = ['nauty.a'],
+                        extra_compile_args=['-std=c++11'],
                         sources=['nautymodule.cpp'])
 
 setup(name = "nauty", maintainer = "Rex Ying", maintainer_email = "rexying@stanford.edu",

@@ -40,10 +40,7 @@ it is necessary to check they are correct.
 #define USE_ANSICONTROLS 0 
                           /* whether --enable-ansicontrols is used */
 
-#ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS 0
-#endif
-
 #if _FILE_OFFSET_BITS == 64
 #define _LARGEFILE_SOURCE
 #else

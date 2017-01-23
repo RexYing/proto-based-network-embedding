@@ -96,7 +96,8 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
     PyObject* rowobj = PySequence_Fast_GET_ITEM(seq, i);
     if (!rowobj) {
       Py_DECREF(seq);
-      free(dbar);
+      free(adjlist);
+      free(degrees);
       PyErr_SetString(PyExc_RuntimeError, "Failed to get item.");
       return 0;
     }

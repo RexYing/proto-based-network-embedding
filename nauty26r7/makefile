@@ -3,7 +3,7 @@
 
 SHELL=/bin/sh
 CC=gcc
-CFLAGS= -O3  -mpopcnt
+CFLAGS= -O3 -fPIC -mpopcnt
 SAFECFLAGS= -O3
 LDFLAGS= 
 THREADLIB=-lpthread
