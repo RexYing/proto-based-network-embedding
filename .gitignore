@@ -9,6 +9,7 @@ __pycache__/
 *.o
 !nauty26r7/nauty.a
 nauty26r7/build/
+*config.status
 
 # Distribution / packaging
 .Python

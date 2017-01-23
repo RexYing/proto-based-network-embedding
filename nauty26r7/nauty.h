@@ -45,9 +45,7 @@ it is necessary to check they are correct.
 #endif
 
 #if _FILE_OFFSET_BITS == 64
-#ifndef _LARGEFILE_SOURCE
 #define _LARGEFILE_SOURCE
-#endif
 #else
 #undef _FILE_OFFSET_BITS
 #endif
@@ -166,7 +164,8 @@ it is necessary to check they are correct.
 *        3-Sep-93 : - make calloc void* in ALPHA version                     *
 *       17-Sep-93 : - renamed to version 1.9,                                *
 *                        changed only dreadnaut.c and nautinv.c              *
-*       24-Feb-94 : changes for version 1.10:                                * *                   - added version SYS_AMIGAAZT, thanks to Carsten Saager   *
+*       24-Feb-94 : changes for version 1.10:                                *
+*                   - added version SYS_AMIGAAZT, thanks to Carsten Saager   *
 *                     (making 1.9+)                                          *
 *       19-Apr-95 : - added prototype wrapper for C++,                       *
 *                     thanks to Daniel Huson                                 *
