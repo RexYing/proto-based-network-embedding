@@ -4,6 +4,18 @@
 
 #include "nausparse.h"    /* which includes nauty.h */
 
+void print_adjlist(sparsegraph sg)
+{
+  for (size_t i = 0; i < sg.vlen; i++)
+  {
+    printf("%d: ", (int)i);
+    for (size_t j = sg.v[i]; j < sg.v[i] + sg.d[i]; j++)
+    {
+      printf("%d, ", sg.e[j]);
+    }
+    printf("\n");
+  }
+}
 
 static int* pylist2intarray(PyObject* item, int &len) {
     PyObject* seq = PySequence_Fast(item, "each adjacency row must be iterable");
@@ -47,13 +59,30 @@ static sparsegraph adjlist2sparsegraph(int** adjlist, int* degrees, int num_node
   int n = num_nodes;
   sparsegraph sg;
   SG_INIT(sg);
-  SG_ALLOC(sg, n, 0, "malloc");
+  
+  int num_edges = 0;
+  for (int i = 0; i < n; i++) {
+    num_edges += degrees[i];
+  }
 
-  sg.nv = n;      /* number of vertices */
-  sg.nde = 0;     /* number of directed edges */
+  SG_ALLOC(sg, n, num_edges, "malloc");
+
+  sg.nv = n;              /* number of vertices */
+  sg.nde = num_edges;     /* number of directed edges */
 
   memcpy(sg.d, degrees, sizeof(int) * n);
 
+  sg.v[0] = 0;
+  for (int i = 1; i < n; i++) {
+    sg.v[i] = sg.v[i-1] + degrees[i-1];
+  }
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < degrees[i]; j++) {
+      sg.e[sg.v[i] + j] = adjlist[i][j];
+    }
+  }
+
+  return sg;
 }
 
 /* Expose sparse nauty canonical labelling */
@@ -103,12 +132,43 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
     }
     adjlist[i] = pylist2intarray(rowobj, len); 
     degrees[i] = len;
-    printf("row size: %d  ", len);
   }    
 
   Py_DECREF(seq);
 
+  DYNALLSTAT(int, lab, lab_sz);
+  DYNALLSTAT(int, ptn, ptn_sz);
+  DYNALLSTAT(int, orbits, orbits_sz);
+  static DEFAULTOPTIONS_SPARSEGRAPH(options);
+  //options.writeautoms = TRUE;
+  options.getcanon = 1;
+  statsblk stats;
+
+  int n = seqlen;
+  int m = SETWORDSNEEDED(n);
+  nauty_check(WORDSIZE, m, n, NAUTYVERSIONID);
+
+  DYNALLOC1(int, lab, lab_sz, n, "malloc");
+  DYNALLOC1(int, ptn, ptn_sz, n, "malloc");
+  DYNALLOC1(int, orbits, orbits_sz, n, "malloc");
+
   sparsegraph g = adjlist2sparsegraph(adjlist, degrees, seqlen);
+  sparsegraph canong;
+  SG_INIT(canong);
+  sparsenauty(&g, lab, ptn, orbits, &options, &stats, &canong);
+
+  /* Automorphism sanity check only */
+  /*
+  printf("Automorphism group size = ");
+  writegroupsize(stdout,stats.grpsize1,stats.grpsize2);
+  printf("\n");
+  */
+
+  sortlists_sg(&canong);
+  printf("original:\n");
+  print_adjlist(g);
+  printf("canon:\n");
+  print_adjlist(canong);
 
   // free arrays
   free(adjlist);
