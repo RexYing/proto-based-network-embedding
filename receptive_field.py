@@ -37,8 +37,31 @@ def receptive_field_candidates(G, node, k):
   return candidates 
 
 
-def rank_candidates(G):
+def rank_candidates(G, candidates):
   labels = label.wl(G)
+
+  id2local = {val: key for (key, val) in list(enumerate(G.nodes()))}
+
+  # Build labels and ptns for canonicalization
+  lab = []
+  ptn = []
+
+  for nodelist in candidates:
+    curr_local_ids = [id2local[id] for id in nodelist]
+    curr_lvl_labels = [labels[id2local[id]] for id in nodelist]
+    print(curr_lvl_labels)
+
+    _, newlabels = np.unique(curr_lvl_labels, return_inverse=True)
+    # nodes with the same label have the same color
+    lab2nodes = [[] for _ in range(np.max(newlabels) + 1)]
+    for i in range(len(newlabels)):
+      lab2nodes[newlabels[i]].append(curr_local_ids[i])
+    for i in range(len(lab2nodes)):
+      lab.extend(lab2nodes[i])
+      ptn.extend([1 for _ in range(len(lab2nodes[i]) - 1)])
+      ptn.append(0)
+  print('lab: %s' % lab)
+  print('ptn: %s' % ptn)
   return G
     
 
@@ -51,10 +74,11 @@ if __name__ == '__main__':
   candidates_flattened = [x for l in candidates for x in l]
 
   localgraph = G.subgraph(candidates_flattened)
+  print(localgraph.nodes())
   pos=nx.spring_layout(localgraph)
   nx.draw_networkx_nodes(localgraph, pos, nodelist=[candidates[0][0]], node_color='b', node_size=500)
   nx.draw_networkx_nodes(localgraph, pos, nodelist=candidates_flattened[1:], node_color='r', node_size=400)
   nx.draw_networkx_edges(localgraph, pos, width=1.0, alpha=0.5)
   plt.show()
 
-  rank_candidates(localgraph) 
+  rank_candidates(localgraph, candidates) 
