@@ -40,9 +40,14 @@ it is necessary to check they are correct.
 #define USE_ANSICONTROLS @have_ansicontrols@ 
                           /* whether --enable-ansicontrols is used */
 
+#ifndef _FILE_OFFSET_BITS
 #define _FILE_OFFSET_BITS @ac_cv_sys_file_offset_bits@
+#endif
+
 #if _FILE_OFFSET_BITS == 64
+#ifndef _LARGEFILE_SOURCE
 #define _LARGEFILE_SOURCE
+#endif
 #else
 #undef _FILE_OFFSET_BITS
 #endif

@@ -4,6 +4,19 @@
 
 #include "nausparse.h"    /* which includes nauty.h */
 
+#ifndef NDEBUG
+#define ASSERT(condition, message) \
+      do { \
+                if (! (condition)) { \
+                              std::cerr << "Assertion `" #condition "` failed in " << __FILE__ \
+                                        << " line " << __LINE__ << ": " << message << std::endl; \
+                              std::terminate(); \
+                          } \
+            } while (false)
+#else
+#define ASSERT(condition, message) do { } while (false)
+#endif
+
 void print_adjlist(sparsegraph sg)
 {
   for (size_t i = 0; i < sg.vlen; i++)
@@ -18,7 +31,7 @@ void print_adjlist(sparsegraph sg)
 }
 
 static int* pylist2intarray(PyObject* item, int &len) {
-    PyObject* seq = PySequence_Fast(item, "each adjacency row must be iterable");
+    PyObject* seq = PySequence_Fast(item, "pylist2intarray: each PyObject row must be iterable.");
     len = PySequence_Fast_GET_SIZE(seq);
     int* arr = (int*) malloc(len * sizeof(int));
     if (!arr) {
@@ -89,21 +102,24 @@ static sparsegraph adjlist2sparsegraph(int** adjlist, int* degrees, int num_node
 static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
 {
   PyObject* seq;
+  // Used for coloring in nauty
+  PyObject* labseq = NULL;
+  PyObject* ptnseq = NULL;
+
   int** adjlist;
   int* degrees;
-  double result;
   int seqlen;
   int i;
 
   /* get one argument as a sequence */
-  if(!PyArg_ParseTuple(args, "O", &seq))
+  if(!PyArg_ParseTuple(args, "O|(OO):sparsenauty", &seq, &labseq, &ptnseq))
     return 0;
   seq = PySequence_Fast(seq, "argument must be iterable");
   if(!seq)
     return 0;
+  seqlen = PySequence_Fast_GET_SIZE(seq);
 
   /* prepare data as an array of doubles */
-  seqlen = PySequence_Fast_GET_SIZE(seq);
   adjlist = (int**) malloc(seqlen * sizeof(int*));
 
   /* handle oom */
@@ -136,9 +152,6 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
 
   Py_DECREF(seq);
 
-  DYNALLSTAT(int, lab, lab_sz);
-  DYNALLSTAT(int, ptn, ptn_sz);
-  DYNALLSTAT(int, orbits, orbits_sz);
   static DEFAULTOPTIONS_SPARSEGRAPH(options);
   //options.writeautoms = TRUE;
   options.getcanon = 1;
@@ -148,9 +161,25 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
   int m = SETWORDSNEEDED(n);
   nauty_check(WORDSIZE, m, n, NAUTYVERSIONID);
 
-  DYNALLOC1(int, lab, lab_sz, n, "malloc");
-  DYNALLOC1(int, ptn, ptn_sz, n, "malloc");
+  DYNALLSTAT(int, orbits, orbits_sz);
   DYNALLOC1(int, orbits, orbits_sz, n, "malloc");
+
+  DYNALLSTAT(int, lab, lab_sz);
+  DYNALLSTAT(int, ptn, ptn_sz);
+  if (labseq && ptnseq) {
+    int lablen = 0;
+    lab = pylist2intarray(labseq, lablen);
+    ASSERT(seqlen == lab_sz, "Label sequence length does not match number of vertices in adjlist.");
+    int ptnlen = 0;
+    ptn = pylist2intarray(ptnseq, ptnlen);
+    ASSERT(seqlen == ptn_sz, "Ptn sequence length does not match number of vertices in adjlist.");
+    /* This option enables color constraints */
+    options.defaultptn = false;
+  } else {
+    printf("no color\n");
+    DYNALLOC1(int, lab, lab_sz, n, "malloc");
+    DYNALLOC1(int, ptn, ptn_sz, n, "malloc");
+  }
 
   sparsegraph g = adjlist2sparsegraph(adjlist, degrees, seqlen);
   sparsegraph canong;
@@ -177,7 +206,12 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
     free(adjlist[i]);
   }
 
-  return Py_BuildValue("i", seqlen);
+  PyObject* labellistobj = PyList_New(0);
+  for (int i = 0; i < n; i++) {
+    PyList_Append(labellistobj, Py_BuildValue("i", lab[i]));
+  }
+
+  return labellistobj;
 }
 
 static PyMethodDef nautyMethods[] = {
