@@ -194,17 +194,19 @@ static PyObject *nauty_sparsenauty(PyObject *self, PyObject *args)
   */
 
   sortlists_sg(&canong);
+  /*
   printf("original:\n");
   print_adjlist(g);
   printf("canon:\n");
   print_adjlist(canong);
+  */
 
   // free arrays
-  free(adjlist);
   free(degrees);
   for (int i = 0; i < seqlen; i++) {
     free(adjlist[i]);
   }
+  free(adjlist);
 
   PyObject* labellistobj = PyList_New(0);
   for (int i = 0; i < n; i++) {

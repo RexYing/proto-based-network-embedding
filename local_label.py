@@ -61,7 +61,6 @@ def wl(G, labels=[]):
   while np.any(prev_labels != labels):
     prev_labels = labels
     labels = wl_color_refinement(G, labels)
-    print(labels)
 
   return labels
 

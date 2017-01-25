@@ -7,6 +7,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import readgraph
 import local_label as label
+import nauty
 
 def receptive_field_candidates(G, node, k):
   """ Return candidates of CNN receptive field using bfs.
@@ -49,7 +50,6 @@ def rank_candidates(G, candidates):
   for nodelist in candidates:
     curr_local_ids = [id2local[id] for id in nodelist]
     curr_lvl_labels = [labels[id2local[id]] for id in nodelist]
-    print(curr_lvl_labels)
 
     _, newlabels = np.unique(curr_lvl_labels, return_inverse=True)
     # nodes with the same label have the same color
@@ -60,8 +60,13 @@ def rank_candidates(G, candidates):
       lab.extend(lab2nodes[i])
       ptn.extend([1 for _ in range(len(lab2nodes[i]) - 1)])
       ptn.append(0)
-  print('lab: %s' % lab)
-  print('ptn: %s' % ptn)
+
+  adjlist = []
+  for node in G.nodes():
+    adjlist.append([id2local[i] for i in G.neighbors(node)])
+  print('Running canonicalization')
+  canon_lab = nauty.canon_sparse(adjlist, (lab, ptn))
+  print('canon: %s' % canon_lab)
   return G
     
 
