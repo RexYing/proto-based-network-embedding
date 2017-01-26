@@ -37,7 +37,7 @@ def wl_color_refinement(G, labels):
   """
   num_nodes = len(labels)
 
-  prime_upper = primes_arguments_required[int(np.ceil(np.log2(num_nodes)))]
+  prime_upper = primes_arguments_required[int(np.ceil(np.log2(num_nodes))) + 1]
   logplist = np.log2(primes(prime_upper))
 
   adjmat = nx.adjacency_matrix(G)
@@ -58,9 +58,13 @@ def wl(G, labels=[]):
   if not labels:
     labels = [1] * len(G.nodes())
   prev_labels = []
+  num_iter = 0
   while np.any(prev_labels != labels):
     prev_labels = labels
     labels = wl_color_refinement(G, labels)
+    num_iter += 1
+    if (num_iter > 10000):
+      print('Not converging')
 
   return labels
 

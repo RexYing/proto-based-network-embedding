@@ -23,23 +23,27 @@ def receptive_field_candidates(G, node, k):
   n_candidates = 1
   candidates = [[node]]
   depth = 0;
-  G.node[node]['depth'] = 0
+  depths = {}
+  depths[node] = 0
   while (n_candidates < k):
     next_depth = []
     for i in candidates[depth]:
       neighbors = G.neighbors(i)
-      neighbors = [x for x in neighbors if (not 'depth' in G.node[x])]
+      neighbors = [x for x in neighbors if (not x in depths)]
       for x in neighbors:
-        G.node[x]['depth'] = depth + 1
+        depths[x] = depth
       next_depth.extend(neighbors)
       n_candidates += len(neighbors)
     depth += 1
+    if not next_depth:
+      break
     candidates.append(next_depth)
   return candidates 
 
 
 def rank_candidates(G, candidates):
   labels = label.wl(G)
+  print('labels: %s' % labels)
 
   id2local = {val: key for (key, val) in list(enumerate(G.nodes()))}
 
@@ -66,12 +70,13 @@ def rank_candidates(G, candidates):
     adjlist.append([id2local[i] for i in G.neighbors(node)])
   print('Running canonicalization')
   canon_lab = nauty.canon_sparse(adjlist, (lab, ptn))
-  print('canon: %s' % canon_lab)
-  return G
+  return canon_lab
     
 
 if __name__ == '__main__':
-  G = readgraph.read_adjlist_undir('data/ca-GrQc.txt')
+  #G = readgraph.read_adjlist_undir('data/ca-GrQc.txt')
+  G = readgraph.read_adjlist_undir('../data/BlogCatalog-labeled/data/edges.csv', ',')
+  G = readgraph.read_node_attribute(G, '../data/BlogCatalog-labeled/data/group-edges.csv', 'group', ',')
 
   node = G.nodes()[0]
   print('neighborhood of node : %s' % node)
@@ -79,11 +84,11 @@ if __name__ == '__main__':
   candidates_flattened = [x for l in candidates for x in l]
 
   localgraph = G.subgraph(candidates_flattened)
-  print(localgraph.nodes())
   pos=nx.spring_layout(localgraph)
   nx.draw_networkx_nodes(localgraph, pos, nodelist=[candidates[0][0]], node_color='b', node_size=500)
   nx.draw_networkx_nodes(localgraph, pos, nodelist=candidates_flattened[1:], node_color='r', node_size=400)
   nx.draw_networkx_edges(localgraph, pos, width=1.0, alpha=0.5)
   plt.show()
 
-  rank_candidates(localgraph, candidates) 
+  canon_lab = rank_candidates(localgraph, candidates) 
+
