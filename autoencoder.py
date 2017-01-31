@@ -4,8 +4,9 @@ import numpy as np
 import os
 import tensorflow as tf
 
-ENCODER_NUM_HIDDEN_NEURONS = [100, 50]
+ENCODER_NUM_HIDDEN_NEURONS = [100, 40]
 DECODER_NUM_HIDDEN_NEURONS = [100]
+
 
 def _variable_on_cpu(name, shape, initializer):
   """Helper to create a Variable stored on CPU memory.
@@ -26,6 +27,18 @@ def _variable_on_cpu(name, shape, initializer):
 
 
 
+def _activation_summary(x):
+  """Helper to create summaries for activations.
+    Creates a summary that provides a histogram of activations.
+    Creates a summary that measures the sparsity of activations.
+
+  Args:
+    x: Tensor
+  """
+  tensor_name = x.op.name
+  tf.histogram_summary(tensor_name + '/activations', x)
+  tf.scalar_summary(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
+
 
 def encode(X):
   batch_size = X.get_shape()[0]
@@ -36,15 +49,22 @@ def encode(X):
                       _variable_on_cpu('weights2', [ENCODER_NUM_HIDDEN_NEURONS[0], ENCODER_NUM_HIDDEN_NEURONS[1]],
                                        tf.truncated_normal_initializer(stddev=5e-2, dtype=tf.float32))]
 
+  encoding_biases = [_variable_on_cpu('biases1', [ENCODER_NUM_HIDDEN_NEURONS[0]],
+                                      tf.constant_initializer(0.0)),
+                     _variable_on_cpu('biases2', [ENCODER_NUM_HIDDEN_NEURONS[1]], 
+                                      tf.constant_initializer(0.0))]
+
   with tf.variable_scope('encode1') as scope:
-    b1 = _variable_on_cpu('biases', [ENCODER_NUM_HIDDEN_NEURONS[0]], tf.constant_initializer(0.0))
-    h1 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(X, encoding_weights[0]), b1), name=scope.name + '/hidden1')
+    h1 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(X, encoding_weights[0]), encoding_biases[0]), name=scope.name + '/hidden1')
+    _activation_summary(h1)
 
   with tf.variable_scope('encode2') as scope:
-    b2 = _variable_on_cpu('biases', [ENCODER_NUM_HIDDEN_NEURONS[1]], tf.constant_initializer(0.0))
-    h2 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(h1, encoding_weights[1]), b2), name=scope.name + '/hidden2')
+    h2 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(h1, encoding_weights[1]), encoding_biases[1]), name=scope.name + '/hidden2')
+    _activation_summary(h2)
+
+  gradf = tf.gradients(h2, X)
   
-  return h2, encoding_weights
+  return h2, encoding_weights, encoding_biases, gradf
 
 def decode(h, input_len, encoding_weights = None):
 
@@ -54,32 +74,72 @@ def decode(h, input_len, encoding_weights = None):
                         _variable_on_cpu('weights2_decode', [ENCODER_NUM_HIDDEN_NEURONS[0], ENCODER_NUM_HIDDEN_NEURONS[1]],
                                          tf.truncated_normal_initializer(stddev=5e-2, dtype=tf.float32))]
   
-  with tf.variable_scope('decode1') as scope:
-    b1 = _variable_on_cpu('bias', [DECODER_NUM_HIDDEN_NEURONS[0]], tf.constant_initializer(0.0))
+  with tf.variable_scope('decode_biases1') as scope:
+    b1 = _variable_on_cpu('decodbias', [DECODER_NUM_HIDDEN_NEURONS[0]], tf.constant_initializer(0.0))
     h1 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(h, tf.transpose(encoding_weights[1])), b1), name=scope.name + '/hidden3')
+    _activation_summary(h1)
 
-  with tf.variable_scope('decode2') as scope:
+  with tf.variable_scope('decode_biases2') as scope:
     b2 = _variable_on_cpu('bias', [input_len], tf.constant_initializer(0.0))
     h2 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(h1, tf.transpose(encoding_weights[0])), b2), name = scope.name +
                     '/hidden4')
+    _activation_summary(h2)
 
   return h2
 
-def loss(inferred, labels):
+def encode_neighbors(neighbors, encoding_weights, encoding_biases):
+  """Encode neighbors
+
+  Args:
+    neighbors: 3-D tensor. Dimensions are batch size, degree, feature length neighbors.
+
+  Returns:
+    3-D tensor of encoded representation of neighbors. Dimensions are batch size, degree, hiddeen
+    feature length.
+  """
+  W0tiled = tf.tile(encoding_weights[0], tf.pack([1, 1, tf.shape(neighbors)[0]]))
+  W1tiled = tf.tile(encoding_weights[1], tf.pack([1, 1, tf.shape(neighbors)[0]]))
+  
+  with tf.variable_scope('encode_neighbors1') as scope:
+    h1 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(neighbors, W0tiled), encoding_biases[0]),
+                    name=scope.name + '/neighbors_hidden0')
+
+  with tf.variable_scope('encode_neighbors1') as scope:
+    h2 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(h1, W1tiled), encoding_biases[1]),
+                    name=scope.name + '/neighbors_hidden1')
+
+  return h2
+
+def loss(inferred, labels, gradf, reg_multiplier, h_neighbors=None, edge_loss_multiplier=0):
   """Add L2Loss to all the trainable variables.
     Add summary for "Loss" and "Loss/avg".
+    Since this is an autoencoder, inferred is the same as labels (except DAE).
+    If h_neighbors is not None, an l2 loss between hidden vectors for adjacent nodes is added.
 
   Args:
     inferred_values: Sensor values output from inference().
     labels: Labels. 1-D tensor of shape [batch_size]
+    gradf: Gradient wrt input for constrastive regularization
+    reg_multiplier: regularization multiplier (0-D tensor)
+    h_neighbors: hidden representation of neighbors (None if no edge constraint should be considered)
+    edge_loss_multiplier: controls how much edge constraint contributes to loss.
   Returns:
     Loss tensor of type float.
   """
+  l2_loss = tf.nn.l2_loss(tf.sub(inferred, labels), name='raw_loss')
+  tf.add_to_collection('losses', l2_loss)
+
+  # regularization
+  reg = tf.scalar_mul(reg_multiplier, tf.norm(gradf))
+  tf.add_to_collection('losses', reg)
+  # l2 regularization
   #loss_weights = _variable_on_cpu('loss_weights', shape=[FLAGS.receptive_field_size], 
   #                                tf.constant_initializer(1 / FLAGS.receptive_field_size))
   #l2_loss = tf.einsum('i,i->', loss_weights, (tf.nn.l2_loss(tf.sub(inferred, labels)), name='raw_loss'), name='weighted_loss')
-  l2_loss = tf.nn.l2_loss(tf.sub(inferred, labels), name='raw_loss')
-  tf.add_to_collection('losses', l2_loss)
+
+  # edge constraints
+  #y_tiled = tf.tile(inferred, 
+
   tf.summary.scalar(l2_loss.name, l2_loss)
   return l2_loss
 

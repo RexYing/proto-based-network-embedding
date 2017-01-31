@@ -30,14 +30,15 @@ tf.app.flags.DEFINE_string('node_label_filename', 'group-edges.csv',
                            """Name of file containing node labels.""")
 tf.app.flags.DEFINE_string('node_label_delimiter', ',',
                            """Delimiter of node label file.""")
-tf.app.flags.DEFINE_integer('receptive_field_size', 150,
+tf.app.flags.DEFINE_integer('receptive_field_size', 200,
                            """Size of receptive field around each node.""")
 tf.app.flags.DEFINE_string('feature_path', 'features.txt',
                            """Saved features.""")
 
 NUM_EPOCHS = 20
 BATCH_SIZE = 30
-GPU_MEM_FRACTION = 0.6
+GPU_MEM_FRACTION = 0.4
+CONTRASTIVE_REG = 0.001
 
 
 def gen_feature(G, receptive_field):
@@ -75,10 +76,12 @@ def train(G):
   n = nx.number_of_nodes(G)
   nodes = G.nodes()
 
+  reg_multiplier = tf.placeholder('float', [1,], 'reg')
   X = tf.placeholder('float', [None, FLAGS.receptive_field_size], 'input')
-  h, weights = ae.encode(X)
+  h, weights, biases, gradf = ae.encode(X)
   recon_x = ae.decode(h, X.get_shape()[1], weights)
-  loss = ae.loss(recon_x, X)
+  # gradient wrt input for constrastive regularization
+  loss = ae.loss(recon_x, X, gradf, reg_multiplier)
   train_op = ae.train(loss, global_step)
   
   init = tf.global_variables_initializer()
@@ -105,7 +108,6 @@ def train(G):
     print('Generate features')
     f = open(FLAGS.feature_path, 'w+')
     for nodeid in G.nodes():
-      print(nodeid)
       feature = gen_node_feature(G, nodeid)
       G.node[nodeid]['feature'] = feature
       line = str(nodeid) + ' '
@@ -120,17 +122,42 @@ def train(G):
     randperm = np.random.permutation(n)
     for i in range(n // BATCH_SIZE):
       batch_x = []
+      batch_neighbors = []
+      batch_degrees = []
       for j in range(BATCH_SIZE):
-        feature = G.node[randperm[i * BATCH_SIZE + j]]['feature']
+        curr_node = G.node[randperm[i * BATCH_SIZE + j]]
+        batch_degrees.append(G.degree(curr_node))
+        feature = curr_node['feature']
         batch_x.append(feature)
-      print(batch_x)
+
+        neighbor_feature_list = [neighbor['feature']  for neighbor in G.neighbors(curr_node)]
+        batch_neighbors.append(neighbor_feature_list)
+
+      # find the maximum degree among the batch of nodes and pad neighbor_feature_list to the max
+      max_deg = np.max(batch_degrees)
+      print('max deg: %d' % max_deg)
+      for i in range(len(batch_neighbors)):
+        batch_neighbors[i] = np.pad(batch_neighbors[i], 
+                                    ((0, max_deg - len(batch_neighbors[i])), (0, 0)),
+                                    'constant')
+      print(batch_neighbors[0].shape)
       
+      print(batch_neighbors.shape)
+      print('batch_x shape: %s' % batch_x.shape)
       start_time = time.time()
-      _, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x})
-      print('loss: %d' % loss_value)
+      _, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x, reg_multiplier: CONTRASTIVE_REG})
       duration = time.time() - start_time
-      
-      #assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+
+      assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
+
+      if step % 1 == 0:
+        num_examples_per_step = FLAGS.batch_size
+        examples_per_sec = num_examples_per_step / duration
+        sec_per_batch = float(duration)
+
+        format_str = ('%s: step %d, loss = %.2f (%.1f examples/sec; %.3f sec/batch)')
+        print(format_str % (datetime.now(), step, loss_value, examples_per_sec,
+                                 sec_per_batch))
 
 
 def main(argv=None):
