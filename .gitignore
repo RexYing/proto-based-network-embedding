@@ -14,7 +14,6 @@ __pycache__/
 *.so
 *.a
 *.o
-!nauty26r7/nauty.a
 nauty26r7/build/
 *config.status
 nauty26r7/autom4te.cache/
@@ -103,4 +102,8 @@ ENV/
 
 # vim
 *.sw?
+
+
+# Output files
+features.txt
 

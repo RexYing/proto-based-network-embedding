@@ -32,9 +32,11 @@ tf.app.flags.DEFINE_string('node_label_delimiter', ',',
                            """Delimiter of node label file.""")
 tf.app.flags.DEFINE_integer('receptive_field_size', 150,
                            """Size of receptive field around each node.""")
+tf.app.flags.DEFINE_string('feature_path', 'features.txt',
+                           """Saved features.""")
 
 NUM_EPOCHS = 20
-BATCH_SIZE = 50
+BATCH_SIZE = 30
 GPU_MEM_FRACTION = 0.6
 
 
@@ -94,17 +96,38 @@ def train(G):
 
   summary_writer = tf.summary.FileWriter(FLAGS.train_log_dir, sess.graph)
 
+  if tf.gfile.Exists(FLAGS.feature_path):
+    with open(FLAGS.feature_path, 'r') as featurefile:
+      for line in featurefile:
+        [nodeid, feature] = line.strip().split()
+        G.node[nodeid]['feature'] = feature.strip().split(',')
+  else:
+    print('Generate features')
+    f = open(FLAGS.feature_path, 'w+')
+    for nodeid in G.nodes():
+      print(nodeid)
+      feature = gen_node_feature(G, nodeid)
+      G.node[nodeid]['feature'] = feature
+      line = str(nodeid) + ' '
+      line += str(feature[0])
+      for i in feature[1:]:
+        line += ',' + str(i)
+      line += '\n'
+      print(line)
+      f.write(line)
+
   for epoch in range(NUM_EPOCHS):
     randperm = np.random.permutation(n)
     for i in range(n // BATCH_SIZE):
       batch_x = []
       for j in range(BATCH_SIZE):
-        feature = gen_node_feature(G, nodes[randperm[i * BATCH_SIZE + j]])
+        feature = G.node[randperm[i * BATCH_SIZE + j]]['feature']
         batch_x.append(feature)
       print(batch_x)
       
       start_time = time.time()
       _, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x})
+      print('loss: %d' % loss_value)
       duration = time.time() - start_time
       
       #assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
