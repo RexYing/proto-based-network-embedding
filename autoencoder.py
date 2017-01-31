@@ -1,6 +1,5 @@
 from __future__ import division, print_function, absolute_import
 
-import matplotlib.pyplot as plt
 import numpy as np
 import os
 import tensorflow as tf

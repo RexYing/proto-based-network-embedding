@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 import readgraph
 
 # (2^i)-th prime
@@ -41,11 +40,11 @@ def wl_color_refinement(G, labels):
   logplist = np.log2(primes(prime_upper))
 
   adjmat = nx.adjacency_matrix(G)
-  signatures = np.round(labels + adjmat.dot([logplist[i] for i in labels]), decimals=10)
+  signatures = np.round(labels + adjmat.dot([logplist[i] for i in labels]), decimals=5)
   _, newlabels = np.unique(signatures, return_inverse=True)
   return newlabels
 
-def wl(G, labels=[]):
+def wl(G, labels=[], steps=0):
   """ Label local neighborhood with WL (Weisfeiler-Lehman) algorithm.
     The distance constraint applies: if d(u, v) < d(w, v), l(u) < l(w)
 
@@ -59,12 +58,13 @@ def wl(G, labels=[]):
     labels = [1] * len(G.nodes())
   prev_labels = []
   num_iter = 0
+
   while np.any(prev_labels != labels):
     prev_labels = labels
     labels = wl_color_refinement(G, labels)
     num_iter += 1
-    if (num_iter > 10000):
-      print('Not converging')
+    if (steps > 0 and num_iter == steps):
+      break
 
   return labels
 

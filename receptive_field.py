@@ -4,10 +4,13 @@ from __future__ import print_function
 
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import readgraph
 import local_label as label
 import nauty
+
+# Number of steps to run the WL color refinement procedure for labeling
+WL_STEPS = 2
 
 def receptive_field_candidates(G, node, k):
   """ Return candidates of CNN receptive field using bfs.
@@ -18,7 +21,7 @@ def receptive_field_candidates(G, node, k):
 
   Returns:
     candidates: 2D list containing candidates for receptive field.
-      The i-th list in candidates contains nodes that are i hops away from the source.
+      The i-th list in candidates contains the IDs of nodes that are i hops away from the source.
   """
   n_candidates = 1
   candidates = [[node]]
@@ -42,8 +45,7 @@ def receptive_field_candidates(G, node, k):
 
 
 def rank_candidates(G, candidates):
-  labels = label.wl(G)
-  print('labels: %s' % labels)
+  labels = label.wl(G, labels=[], steps=WL_STEPS)
 
   id2local = {val: key for (key, val) in list(enumerate(G.nodes()))}
 
@@ -84,11 +86,11 @@ if __name__ == '__main__':
   candidates_flattened = [x for l in candidates for x in l]
 
   localgraph = G.subgraph(candidates_flattened)
-  pos=nx.spring_layout(localgraph)
-  nx.draw_networkx_nodes(localgraph, pos, nodelist=[candidates[0][0]], node_color='b', node_size=500)
-  nx.draw_networkx_nodes(localgraph, pos, nodelist=candidates_flattened[1:], node_color='r', node_size=400)
-  nx.draw_networkx_edges(localgraph, pos, width=1.0, alpha=0.5)
-  plt.show()
+#  pos=nx.spring_layout(localgraph)
+#  nx.draw_networkx_nodes(localgraph, pos, nodelist=[candidates[0][0]], node_color='b', node_size=500)
+#  nx.draw_networkx_nodes(localgraph, pos, nodelist=candidates_flattened[1:], node_color='r', node_size=400)
+#  nx.draw_networkx_edges(localgraph, pos, width=1.0, alpha=0.5)
+#  plt.show()
 
   canon_lab = rank_candidates(localgraph, candidates) 
 

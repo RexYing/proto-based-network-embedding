@@ -1,7 +1,7 @@
 
 from __future__ import division, print_function, absolute_import
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import os
@@ -39,10 +39,18 @@ GPU_MEM_FRACTION = 0.6
 
 
 def gen_feature(G, receptive_field):
+  """ Generate feature for nodes in receptive field
+
+  Args:
+    G: Graph that contains nodes in receptive field, used to generate structure-related features.
+    receptive_field: List containing IDs of nodes in receptive field.
+
+  Returns:
+    A feature vector containing concatenation of features for nodes in receptive field
+  """
   feature = []
   for i in range(len(receptive_field)):
-    nodes = G.nodes()
-    feature.append(nx.degree(G, nodes[receptive_field[i]]))
+    feature.append(nx.degree(G, receptive_field[i]))
   if len(feature) < FLAGS.receptive_field_size:
     feature += [0] * (FLAGS.receptive_field_size - len(feature))
   return feature
@@ -50,13 +58,14 @@ def gen_feature(G, receptive_field):
 def gen_node_feature(G, nodeid):
   candidates = rf.receptive_field_candidates(G, nodeid, FLAGS.receptive_field_size)
   candidates_flattened = [x for l in candidates for x in l]
-  print('candidates: %s' % len(candidates_flattened))
+  #print('candidates: %s' % len(candidates_flattened))
   print('node: %s' % nodeid)
-  degree = nx.degree(G, nodeid)
-  print('degree: %s' % degree)
   localgraph = G.subgraph(candidates_flattened)
   ranking = rf.rank_candidates(localgraph, candidates) 
-  return gen_feature(localgraph, ranking[:FLAGS.receptive_field_size])
+
+  nodes = localgraph.nodes()
+  receptive_field = [nodes[ranking[i]] for i in range(0, FLAGS.receptive_field_size)]
+  return gen_feature(G, receptive_field)
 
 def train(G):
   global_step = tf.Variable(0, trainable=False)
@@ -91,11 +100,11 @@ def train(G):
       batch_x = []
       for j in range(BATCH_SIZE):
         feature = gen_node_feature(G, nodes[randperm[i * BATCH_SIZE + j]])
-        print('feature: %s' % feature)
         batch_x.append(feature)
+      print(batch_x)
       
       start_time = time.time()
-      #_, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x})
+      _, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x})
       duration = time.time() - start_time
       
       #assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
