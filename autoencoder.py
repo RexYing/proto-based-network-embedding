@@ -36,8 +36,8 @@ def _activation_summary(x):
     x: Tensor
   """
   tensor_name = x.op.name
-  tf.histogram_summary(tensor_name + '/activations', x)
-  tf.scalar_summary(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
+  tf.summary.histogram('activations', x)
+  tf.summary.scalar('/sparsity', tf.nn.zero_fraction(x))
 
 
 def encode(X):
@@ -130,7 +130,8 @@ def loss(inferred, labels, gradf, reg_multiplier, h_neighbors=None, edge_loss_mu
   tf.add_to_collection('losses', l2_loss)
 
   # regularization
-  reg = tf.scalar_mul(reg_multiplier, tf.norm(gradf))
+  gradf_norm = tf.reduce_mean(tf.square(gradf), name='gradnorm')
+  reg = tf.mul(reg_multiplier, gradf_norm)
   tf.add_to_collection('losses', reg)
   # l2 regularization
   #loss_weights = _variable_on_cpu('loss_weights', shape=[FLAGS.receptive_field_size], 
