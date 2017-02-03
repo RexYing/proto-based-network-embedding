@@ -32,9 +32,9 @@ tf.app.flags.DEFINE_string('node_label_delimiter', ',',
                            """Delimiter of node label file.""")
 tf.app.flags.DEFINE_integer('receptive_field_size', 200,
                            """Size of receptive field around each node.""")
-tf.app.flags.DEFINE_string('feature_path', 'features.txt',
+tf.app.flags.DEFINE_string('receptive_field_path', 'rf.txt',
                            """Saved features.""")
-tf.app.flags.DEFINE_boolean('continue_feature', False, """Continue feature extraction.""")
+tf.app.flags.DEFINE_boolean('continue_receptive_field', False, """Continue feature extraction.""")
 
 NUM_EPOCHS = 20
 BATCH_SIZE = 30
@@ -104,15 +104,15 @@ def train(G):
 
   summary_writer = tf.summary.FileWriter(FLAGS.train_log_dir, sess.graph)
 
-  if tf.gfile.Exists(FLAGS.feature_path):
-    with open(FLAGS.feature_path, 'r') as featurefile:
-      for line in featurefile:
+  if tf.gfile.Exists(FLAGS.receptive_field_path):
+    with open(FLAGS.receptive_field_path, 'r') as rffile:
+      for line in rffile:
         [nodeid, rf] = line.strip().split()
         G.node[nodeid]['feature'] = gen_feature(rf.strip().split(','))
 
-  if (not tf.gfile.Exists(FLAGS.feature_path)) or FLAGS.continue_feature:
+  if (not tf.gfile.Exists(FLAGS.receptive_field_path)) or FLAGS.continue_receptive_field:
     print('Generate receptive fields')
-    f = open(FLAGS.feature_path, 'a+')
+    f = open(FLAGS.receptive_field_path, 'a+')
     for nodeid in G.nodes():
       #feature = gen_node_feature(G, nodeid)
       #G.node[nodeid]['feature'] = feature
