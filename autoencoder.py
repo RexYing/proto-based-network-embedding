@@ -97,8 +97,8 @@ def encode_neighbors(neighbors, encoding_weights, encoding_biases):
     3-D tensor of encoded representation of neighbors. Dimensions are batch size, degree, hiddeen
     feature length.
   """
-  W0tiled = tf.tile(encoding_weights[0], tf.pack([1, 1, tf.shape(neighbors)[0]]))
-  W1tiled = tf.tile(encoding_weights[1], tf.pack([1, 1, tf.shape(neighbors)[0]]))
+  W0tiled = tf.tile(encoding_weights[0], tf.pack([tf.shape(neighbors)[0], 1, 1]))
+  W1tiled = tf.tile(encoding_weights[1], tf.pack([tf.shape(neighbors)[0], 1, 1]))
   
   with tf.variable_scope('encode_neighbors1') as scope:
     h1 = tf.nn.tanh(tf.nn.bias_add(tf.matmul(neighbors, W0tiled), encoding_biases[0]),
@@ -121,11 +121,11 @@ def loss(inferred, labels, gradf, reg_multiplier, h_neighbors=None, edge_loss_mu
     labels: Labels. 1-D tensor of shape [batch_size]
     gradf: Gradient wrt input for constrastive regularization
     reg_multiplier: regularization multiplier (0-D tensor)
-    h_neighbors: hidden representation of neighbors (None if no edge constraint should be considered)
+    h_neighbors: hidden representation of neighbors (None if no edge constraint should be
+        considered), with dimension (batch size x degree x hidden vector size)
     edge_loss_multiplier: controls how much edge constraint contributes to loss.
   Returns:
-    Loss tensor of type float.
-  """
+    Loss tensor of type float.  """
   l2_loss = tf.nn.l2_loss(tf.sub(inferred, labels), name='raw_loss')
   tf.add_to_collection('losses', l2_loss)
 

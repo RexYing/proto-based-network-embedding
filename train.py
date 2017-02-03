@@ -34,6 +34,7 @@ tf.app.flags.DEFINE_integer('receptive_field_size', 200,
                            """Size of receptive field around each node.""")
 tf.app.flags.DEFINE_string('feature_path', 'features.txt',
                            """Saved features.""")
+tf.app.flags.DEFINE_boolean('continue_feature', False, """Continue feature extraction.""")
 
 NUM_EPOCHS = 20
 BATCH_SIZE = 30
@@ -58,7 +59,7 @@ def gen_feature(G, receptive_field):
     feature += [0] * (FLAGS.receptive_field_size - len(feature))
   return feature
 
-def gen_node_feature(G, nodeid):
+def gen_receptive_field(G, nodeid):
   candidates = rf.receptive_field_candidates(G, nodeid, FLAGS.receptive_field_size)
   candidates_flattened = [x for l in candidates for x in l]
   #print('candidates: %s' % len(candidates_flattened))
@@ -68,6 +69,10 @@ def gen_node_feature(G, nodeid):
 
   nodes = localgraph.nodes()
   receptive_field = [nodes[ranking[i]] for i in range(0, FLAGS.receptive_field_size)]
+  return receptive_field
+
+def gen_node_feature(G, nodeid):
+  receptive_field = gen_receptive_field(G, nodeid)
   return gen_feature(G, receptive_field)
 
 def train(G):
@@ -102,21 +107,24 @@ def train(G):
   if tf.gfile.Exists(FLAGS.feature_path):
     with open(FLAGS.feature_path, 'r') as featurefile:
       for line in featurefile:
-        [nodeid, feature] = line.strip().split()
-        G.node[nodeid]['feature'] = feature.strip().split(',')
-  else:
-    print('Generate features')
-    f = open(FLAGS.feature_path, 'w+')
+        [nodeid, rf] = line.strip().split()
+        G.node[nodeid]['feature'] = gen_feature(rf.strip().split(','))
+
+  if (not tf.gfile.Exists(FLAGS.feature_path)) or FLAGS.continue_feature:
+    print('Generate receptive fields')
+    f = open(FLAGS.feature_path, 'a+')
     for nodeid in G.nodes():
-      feature = gen_node_feature(G, nodeid)
-      G.node[nodeid]['feature'] = feature
+      #feature = gen_node_feature(G, nodeid)
+      #G.node[nodeid]['feature'] = feature
       line = str(nodeid) + ' '
-      line += str(feature[0])
-      for i in feature[1:]:
+      receptive_field = gen_receptive_field(G, nodeid)
+      line += str(receptive_field[0])
+      for i in receptive_field[1:]:
         line += ',' + str(i)
       line += '\n'
       print(line)
       f.write(line)
+
 
   for epoch in range(NUM_EPOCHS):
     randperm = np.random.permutation(n)
@@ -129,7 +137,6 @@ def train(G):
         batch_degrees.append(G.degree(curr_node))
         feature = curr_node['feature']
         batch_x.append(feature)
-
         neighbor_feature_list = [neighbor['feature']  for neighbor in G.neighbors(curr_node)]
         batch_neighbors.append(neighbor_feature_list)
 
