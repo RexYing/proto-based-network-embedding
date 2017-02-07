@@ -1,7 +1,7 @@
 
 from __future__ import division, print_function, absolute_import
 
-#import matplotlib.pyplot as plt
+from datetime import datetime
 import networkx as nx
 import numpy as np
 import os
@@ -22,6 +22,8 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 tf.app.flags.DEFINE_string('graph_dir', '../data/BlogCatalog-labeled/data',
                            """Directory containing graph data.""")
+tf.app.flags.DEFINE_string('node_filename', 'nodes.csv',
+                           """Name of file containing graph edges.""")
 tf.app.flags.DEFINE_string('edge_filename', 'edges.csv',
                            """Name of file containing graph edges.""")
 tf.app.flags.DEFINE_string('edge_delimiter', ',',
@@ -30,16 +32,16 @@ tf.app.flags.DEFINE_string('node_label_filename', 'group-edges.csv',
                            """Name of file containing node labels.""")
 tf.app.flags.DEFINE_string('node_label_delimiter', ',',
                            """Delimiter of node label file.""")
-tf.app.flags.DEFINE_integer('receptive_field_size', 200,
+tf.app.flags.DEFINE_integer('receptive_field_size', 50,
                            """Size of receptive field around each node.""")
 tf.app.flags.DEFINE_string('receptive_field_path', 'rf.txt',
                            """Saved features.""")
 tf.app.flags.DEFINE_boolean('continue_receptive_field', False, """Continue feature extraction.""")
+tf.app.flags.DEFINE_integer('batch_size', 30, """Batch size.""")
+tf.app.flags.DEFINE_float('reg', 0.0000, """Regularization multiplier.""")
 
-NUM_EPOCHS = 20
-BATCH_SIZE = 30
-GPU_MEM_FRACTION = 0.4
-CONTRASTIVE_REG = 0.001
+NUM_EPOCHS = 40
+GPU_MEM_FRACTION = 0.5
 
 
 def gen_feature(G, receptive_field):
@@ -54,10 +56,18 @@ def gen_feature(G, receptive_field):
   """
   feature = []
   for i in range(len(receptive_field)):
-    feature.append(nx.degree(G, receptive_field[i]))
+    if receptive_field[i] not in G:
+      print('Node not in graph: %s' % receptive_field[i])
+    feature.append(G.degree(receptive_field[i]))
   if len(feature) < FLAGS.receptive_field_size:
     feature += [0] * (FLAGS.receptive_field_size - len(feature))
   return feature
+
+def gen_features(G):
+  """ Generate feature for all nodes in G according to their receptive fields.
+  """
+  for node in G.nodes():
+    G.node[node]['feature'] = gen_feature(G, G.node[node]['rf'])
 
 def gen_receptive_field(G, nodeid):
   candidates = rf.receptive_field_candidates(G, nodeid, FLAGS.receptive_field_size)
@@ -71,9 +81,31 @@ def gen_receptive_field(G, nodeid):
   receptive_field = [nodes[ranking[i]] for i in range(0, FLAGS.receptive_field_size)]
   return receptive_field
 
-def gen_node_feature(G, nodeid):
-  receptive_field = gen_receptive_field(G, nodeid)
-  return gen_feature(G, receptive_field)
+
+def create_batch(G, randperm, batch_idx):
+  nodes = G.nodes()
+  batch_x = []
+  batch_neighbors = []
+  batch_degrees = []
+  for j in range(FLAGS.batch_size):
+    nodeid = nodes[randperm[batch_idx * FLAGS.batch_size + j]]
+    curr_node = G.node[nodeid]
+    batch_degrees.append(G.degree(nodeid))
+    feature = curr_node['feature']
+    batch_x.append(feature)
+    neighbor_feature_list = [G.node[neighbor]['feature']  for neighbor in G.neighbors(nodeid)]
+    batch_neighbors.append(neighbor_feature_list)
+
+  # find the maximum degree among the batch of nodes and pad neighbor_feature_list to the max
+  max_deg = np.max(batch_degrees)
+  for i in range(len(batch_neighbors)):
+    batch_neighbors[i] = np.pad(batch_neighbors[i], 
+                                ((0, max_deg - len(batch_neighbors[i])), (0, 0)),
+                                'constant')
+  #print(np.array(batch_neighbors).shape)
+  #print(np.array(batch_x).shape)
+  return batch_x, batch_neighbors
+
 
 def train(G):
   global_step = tf.Variable(0, trainable=False)
@@ -81,8 +113,8 @@ def train(G):
   n = nx.number_of_nodes(G)
   nodes = G.nodes()
 
-  reg_multiplier = tf.placeholder('float', [1,], 'reg')
   X = tf.placeholder('float', [None, FLAGS.receptive_field_size], 'input')
+  reg_multiplier = tf.placeholder('float', (), 'reg')
   h, weights, biases, gradf = ae.encode(X)
   recon_x = ae.decode(h, X.get_shape()[1], weights)
   # gradient wrt input for constrastive regularization
@@ -108,51 +140,38 @@ def train(G):
     with open(FLAGS.receptive_field_path, 'r') as rffile:
       for line in rffile:
         [nodeid, rf] = line.strip().split()
-        G.node[nodeid]['feature'] = gen_feature(rf.strip().split(','))
+        receptive_field = rf.strip().split(',')
+        G.node[nodeid]['rf'] = receptive_field[:FLAGS.receptive_field_size]
 
   if (not tf.gfile.Exists(FLAGS.receptive_field_path)) or FLAGS.continue_receptive_field:
     print('Generate receptive fields')
     f = open(FLAGS.receptive_field_path, 'a+')
     for nodeid in G.nodes():
-      #feature = gen_node_feature(G, nodeid)
-      #G.node[nodeid]['feature'] = feature
-      line = str(nodeid) + ' '
-      receptive_field = gen_receptive_field(G, nodeid)
-      line += str(receptive_field[0])
-      for i in receptive_field[1:]:
-        line += ',' + str(i)
-      line += '\n'
-      print(line)
-      f.write(line)
+      if not 'rf' in G.node[nodeid]:
+        receptive_field = gen_receptive_field(G, nodeid)
+        G.node[nodeid]['rf'] = receptive_field
 
+        line = str(nodeid) + ' '
+        line += str(receptive_field[0])
+        for i in receptive_field[1:]:
+          line += ',' + str(i)
+        line += '\n'
+        print(line)
+        f.write(line)
 
+  gen_features(G)
+  nodes = G.nodes()
+  step = 0
   for epoch in range(NUM_EPOCHS):
+    print('Epoch: %d' % epoch)
     randperm = np.random.permutation(n)
-    for i in range(n // BATCH_SIZE):
-      batch_x = []
-      batch_neighbors = []
-      batch_degrees = []
-      for j in range(BATCH_SIZE):
-        curr_node = G.node[randperm[i * BATCH_SIZE + j]]
-        batch_degrees.append(G.degree(curr_node))
-        feature = curr_node['feature']
-        batch_x.append(feature)
-        neighbor_feature_list = [neighbor['feature']  for neighbor in G.neighbors(curr_node)]
-        batch_neighbors.append(neighbor_feature_list)
+    for batch_idx in range(n // FLAGS.batch_size):
 
-      # find the maximum degree among the batch of nodes and pad neighbor_feature_list to the max
-      max_deg = np.max(batch_degrees)
-      print('max deg: %d' % max_deg)
-      for i in range(len(batch_neighbors)):
-        batch_neighbors[i] = np.pad(batch_neighbors[i], 
-                                    ((0, max_deg - len(batch_neighbors[i])), (0, 0)),
-                                    'constant')
-      print(batch_neighbors[0].shape)
+      batch_x, batch_neighbors = create_batch(G, randperm, batch_idx)
+      feeddict = {X: batch_x, reg_multiplier: FLAGS.reg}
       
-      print(batch_neighbors.shape)
-      print('batch_x shape: %s' % batch_x.shape)
       start_time = time.time()
-      _, loss_value = sess.run([train_op, loss], feed_dict={X: batch_x, reg_multiplier: CONTRASTIVE_REG})
+      _, loss_value = sess.run([train_op, loss], feed_dict=feeddict)
       duration = time.time() - start_time
 
       assert not np.isnan(loss_value), 'Model diverged with loss = NaN'
@@ -166,6 +185,12 @@ def train(G):
         print(format_str % (datetime.now(), step, loss_value, examples_per_sec,
                                  sec_per_batch))
 
+      if step % 10 == 0:
+        summary_str = sess.run(summary_op, feed_dict=feeddict)
+        summary_writer.add_summary(summary_str, step)
+
+      step += 1
+
 
 def main(argv=None):
   if tf.gfile.Exists(FLAGS.train_log_dir):
@@ -173,6 +198,7 @@ def main(argv=None):
     tf.gfile.MakeDirs(FLAGS.train_log_dir)
 
   G = readgraph.read_adjlist_undir(os.path.join(FLAGS.graph_dir, FLAGS.edge_filename), ',')
+  readgraph.add_nodes(G, os.path.join(FLAGS.graph_dir, FLAGS.node_filename))
   G = readgraph.read_node_attribute(G, os.path.join(FLAGS.graph_dir, FLAGS.node_label_filename), 'group', ',')
   train(G)
 
