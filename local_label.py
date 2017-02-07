@@ -24,12 +24,13 @@ def primes(n):
   return out
 
 
-def wl_color_refinement(G, labels):
+def wl_color_refinement(G, labels, sparse=True):
   """ Color refinement using WL algorithm.
 
   Args:
     G: input graph.
     labels: List of labels for nodes in G, ordered according to G.nodes().
+    sparse: True if G is sparse
 
   Returns:
     labels: Refined labels
@@ -39,9 +40,23 @@ def wl_color_refinement(G, labels):
   prime_upper = primes_arguments_required[int(np.ceil(np.log2(num_nodes))) + 1]
   logplist = np.log2(primes(prime_upper))
 
-  adjmat = nx.adjacency_matrix(G)
-  signatures = np.round(labels + adjmat.dot([logplist[i] for i in labels]), decimals=5)
+  # Use adj matrix multiplication if the graph is not sparse
+  if not sparse:
+    adjmat = nx.adjacency_matrix(G)
+    signatures = np.round(labels + adjmat.dot([logplist[i] for i in labels]), decimals=5)
+  else:
+    nodes = G.nodes()
+    # perfect hash
+    nodeid2hash = {nodes[i]: logplist[labels[i]] for i in range(num_nodes)}
+    signatures = []
+    for curr_node in nodes:
+      hash_val = 0
+      for neighbor in G.neighbors(curr_node):
+        hash_val += nodeid2hash[neighbor]
+      signatures.append(hash_val)
+  
   _, newlabels = np.unique(signatures, return_inverse=True)
+
   return newlabels
 
 def wl(G, labels=[], steps=0):

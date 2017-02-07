@@ -21,6 +21,13 @@ def read_node_attribute(G, filename, attr_name, delimiter):
       G.node[id][attr_name] = attr
   return G
 
+def add_nodes(G, filename):
+  with open(filename, 'r') as nodefile:
+    for line in nodefile:
+      nodeid = line.strip()
+      if nodeid not in G:
+        G.add_node(node_id)
+  return G
 
 def read_adjlist_undir(filename, delimiter):
   """ Read adjacency list from txt files.
