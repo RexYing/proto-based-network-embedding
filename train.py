@@ -1,5 +1,6 @@
 
 from __future__ import division, print_function, absolute_import
+from autoencoder import Autoencoder
 
 from datetime import datetime
 import networkx as nx
@@ -37,8 +38,10 @@ tf.app.flags.DEFINE_integer('receptive_field_size', 50,
 tf.app.flags.DEFINE_string('receptive_field_path', 'rf.txt',
                            """Saved features.""")
 tf.app.flags.DEFINE_boolean('continue_receptive_field', False, """Continue feature extraction.""")
+
+# training params
 tf.app.flags.DEFINE_integer('batch_size', 30, """Batch size.""")
-tf.app.flags.DEFINE_float('reg', 0.0000, """Regularization multiplier.""")
+tf.app.flags.DEFINE_float('weight_decay', 0.0000, """Weight decay for regularization.""")
 
 NUM_EPOCHS = 40
 GPU_MEM_FRACTION = 0.5
@@ -162,16 +165,24 @@ def train(G):
   gen_features(G)
   nodes = G.nodes()
   step = 0
+
+  layer_sizes = [50, 20, 10]
+  placeholders = {'features': X, 'weight_decay': wd, 'dropout': dropout}
+  model = Autoencoder(placeholders, layer_sizes, tied_weights=True)
+
   for epoch in range(NUM_EPOCHS):
     print('Epoch: %d' % epoch)
     randperm = np.random.permutation(n)
     for batch_idx in range(n // FLAGS.batch_size):
 
       batch_x, batch_neighbors = create_batch(G, randperm, batch_idx)
-      feeddict = {X: batch_x, reg_multiplier: FLAGS.reg}
+
+      feeddict = {X: batch_x, wd: FLAGS.weight_decay}
+
       
       start_time = time.time()
-      _, loss_value = sess.run([train_op, loss], feed_dict=feeddict)
+      _, loss_value = sess.run([model.opt_op, model.loss], feed_dict=feeddict)
+      #_, loss_value = sess.run([train_op, loss], feed_dict=feeddict)
       duration = time.time() - start_time
 
       assert not np.isnan(loss_value), 'Model diverged with loss = NaN'

@@ -1,4 +1,5 @@
 from __future__ import division, print_function, absolute_import
+from models import Model
 
 import numpy as np
 import os
@@ -39,6 +40,30 @@ def _activation_summary(x):
   tf.summary.histogram('activations', x)
   tf.summary.scalar('/sparsity', tf.nn.zero_fraction(x))
 
+def _add_loss_summaries(loss):
+  """Add summaries for losses in CIFAR-10 model.
+    Generates moving average for all losses and associated summaries for
+    visualizing the performance of the network.
+
+  Args:
+    total_loss: Total loss from loss().
+  Returns: 
+    loss_averages_op: op for generating moving averages of losses.  
+  """
+  # Compute the moving average of all individual losses and the total loss.
+  loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
+  losses = tf.get_collection('losses')
+  loss_averages_op = loss_averages.apply(losses + [loss])
+
+  # Attach a scalar summary to all individual losses and the total loss; do the
+  # same for the averaged version of the losses.
+  for l in losses + [loss]:
+    # Name each loss as '(raw)' and name the moving average version of the loss
+    # as the original loss name.
+    tf.summary.scalar(l.op.name +' (raw)', l)
+    tf.summary.scalar(l.op.name, loss_averages.average(l))
+
+  return loss_averages_op
 
 def create_encoding_weights(layer_size, name_prefix):
   encoding_weights = []
@@ -50,6 +75,97 @@ def create_encoding_weights(layer_size, name_prefix):
       tf.truncated_normal_initializer(stddev=5e-2, dtype=tf.float32)))
     prev_size = curr_size
   return encoding_weights
+
+
+class Autoencoder(Model):
+  def __init__(self, placeholders, layer_sizes, tied_weights=True, **kwargs):
+    """
+      Simple autoencoder constructor.
+
+    Args:
+      placeholders: contain placeholders corresponding to 'features' (same as labels), 'dropout'
+          (drop probability), 'weight_decay' (decay weights for regularization).
+      layer_sizes: the feature dimensions for input, hidden layers and output.
+    """
+    super(GCN, self).__init__(**kwargs)
+
+    self.inputs = placeholders['features']
+    self.input_dim = self.inputs.get_shape()[1] 
+    self.output_dim = self.input_dim
+    self.placeholders = placeholders
+    self.layer_sizes = layer_sizes
+    self.embedding_layer_idx = (len(layer_sizes) - 1) // 2
+
+    self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
+
+    self.build()
+
+  def _loss(self, h_neighbors=None, edge_loss_multiplier=0):
+      # Weight decay loss
+      #for var in self.layers[0].vars.values():
+      #    self.loss += FLAGS.weight_decay * tf.nn.l2_loss(var)
+
+      # Cross entropy error
+      #self.loss += masked_softmax_cross_entropy(self.outputs, self.placeholders['labels'],
+      #                                          self.placeholders['labels_mask'])
+    """Add L2Loss to all the trainable variables.
+      Add summary for "Loss" and "Loss/avg".
+      Since this is an autoencoder, inferred is the same as labels (except DAE).
+      If h_neighbors is not None, an l2 loss between hidden vectors for adjacent nodes is added.
+  
+    Args:
+      h_neighbors: hidden representation of neighbors (None if no edge constraint should be
+          considered), with dimension (batch size x degree x hidden vector size)
+      edge_loss_multiplier: controls how much edge constraint contributes to loss.
+    Returns:
+      Loss tensor of type float.  
+    """
+    diff = tf.sub(self.outputs, self.inputs, 'recon_diff')
+    l2_loss = tf.reduce_mean(tf.square(diff), name='raw_loss')
+    tf.add_to_collection('losses', l2_loss)
+  
+    # regularization
+    gradf = tf.gradients(self.activations[self.embedding_layer_idx], self.inputs)
+    gradf_norm = tf.reduce_mean(tf.square(gradf), name='gradnorm')
+    reg = tf.mul(self.placeholders['weight_decay'], gradf_norm)
+    tf.add_to_collection('losses', reg)
+    # l2 regularization
+    #loss_weights = _variable_on_cpu('loss_weights', shape=[FLAGS.receptive_field_size], 
+    #                                tf.constant_initializer(1 / FLAGS.receptive_field_size))
+    #l2_loss = tf.einsum('i,i->', loss_weights, (tf.nn.l2_loss(diff), name='raw_loss'), name='weighted_loss')
+  
+    # edge constraints
+    #y_tiled = tf.tile(inferred, 
+  
+    tf.summary.scalar(l2_loss.name, l2_loss)
+    return l2_loss
+
+  def _accuracy(self):
+    self.accuracy = []
+    #TODO: measure test accuracy
+
+  def _build(self):
+
+    encode1 = Dense(input_dim=self.input_dim,
+                              output_dim=self.layer_sizes[1],
+                              placeholders=self.placeholders,
+                              act=tf.nn.relu,
+                              dropout=self.placeholders['dropout'],
+                              logging=self.logging)
+    self.layers.append(encode1)
+    weights1 = tf.transpose(encode1.vars['weights'])
+    
+    self.layers.append(Dense(input_dim=self.layer_sizes[1],
+                             output_dim=self.output_dim,
+                             placeholders=self.placeholders,
+                             act=lambda x: x,
+                             dropout=self.placeholders['dropout'],
+                             shared_weights=weights1,
+                             logging=self.logging))
+
+
+
+
 
 
 def encode(X):
@@ -117,66 +233,7 @@ def encode_neighbors(neighbors, encoding_weights, encoding_biases):
 
   return h2
 
-def loss(inferred, labels, gradf, reg_multiplier, h_neighbors=None, edge_loss_multiplier=0):
-  """Add L2Loss to all the trainable variables.
-    Add summary for "Loss" and "Loss/avg".
-    Since this is an autoencoder, inferred is the same as labels (except DAE).
-    If h_neighbors is not None, an l2 loss between hidden vectors for adjacent nodes is added.
 
-  Args:
-    inferred_values: Sensor values output from inference().
-    labels: Labels. 1-D tensor of shape [batch_size]
-    gradf: Gradient wrt input for constrastive regularization
-    reg_multiplier: regularization multiplier (0-D tensor)
-    h_neighbors: hidden representation of neighbors (None if no edge constraint should be
-        considered), with dimension (batch size x degree x hidden vector size)
-    edge_loss_multiplier: controls how much edge constraint contributes to loss.
-  Returns:
-    Loss tensor of type float.  """
-  #l2_loss = tf.nn.l2_loss(tf.sub(inferred, labels), name='raw_loss')
-  diff = tf.sub(inferred, labels, 'recon_diff')
-  l2_loss = tf.reduce_mean(tf.square(diff), name='raw_loss')
-  tf.add_to_collection('losses', l2_loss)
-
-  # regularization
-  gradf_norm = tf.reduce_mean(tf.square(gradf), name='gradnorm')
-  reg = tf.mul(reg_multiplier, gradf_norm)
-  tf.add_to_collection('losses', reg)
-  # l2 regularization
-  #loss_weights = _variable_on_cpu('loss_weights', shape=[FLAGS.receptive_field_size], 
-  #                                tf.constant_initializer(1 / FLAGS.receptive_field_size))
-  #l2_loss = tf.einsum('i,i->', loss_weights, (tf.nn.l2_loss(tf.sub(inferred, labels)), name='raw_loss'), name='weighted_loss')
-
-  # edge constraints
-  #y_tiled = tf.tile(inferred, 
-
-  tf.summary.scalar(l2_loss.name, l2_loss)
-  return l2_loss
-
-def _add_loss_summaries(loss):
-  """Add summaries for losses in CIFAR-10 model.
-    Generates moving average for all losses and associated summaries for
-    visualizing the performance of the network.
-
-  Args:
-    total_loss: Total loss from loss().
-  Returns: 
-    loss_averages_op: op for generating moving averages of losses.  
-  """
-  # Compute the moving average of all individual losses and the total loss.
-  loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
-  losses = tf.get_collection('losses')
-  loss_averages_op = loss_averages.apply(losses + [loss])
-
-  # Attach a scalar summary to all individual losses and the total loss; do the
-  # same for the averaged version of the losses.
-  for l in losses + [loss]:
-    # Name each loss as '(raw)' and name the moving average version of the loss
-    # as the original loss name.
-    tf.summary.scalar(l.op.name +' (raw)', l)
-    tf.summary.scalar(l.op.name, loss_averages.average(l))
-
-  return loss_averages_op
 
 
 def train(loss, global_step):
