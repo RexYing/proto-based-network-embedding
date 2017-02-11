@@ -1,7 +1,5 @@
 
 from __future__ import division, print_function, absolute_import
-from autoencoder import Autoencoder
-
 from datetime import datetime
 import networkx as nx
 import numpy as np
@@ -9,7 +7,7 @@ import os
 import tensorflow as tf
 import time
 
-import autoencoder as ae
+from autoencoder import Autoencoder
 import readgraph
 import receptive_field as rf
 
@@ -123,12 +121,6 @@ def train(G):
   layer_sizes = [5, 5, 5]
   placeholders = {'features': X, 'weight_decay': wd, 'dropout': dropout}
   model = Autoencoder(placeholders, layer_sizes, tied_weights=True)
-  #h, weights, biases, gradf = ae.encode(X)
-  #recon_x = ae.decode(h, X.get_shape()[1], weights)
-
-  # gradient wrt input for constrastive regularization
-  #loss = ae.loss(recon_x, X, gradf, reg_multiplier)
-  #train_op = ae.train(loss, global_step)
   
   init = tf.global_variables_initializer()
   saver = tf.train.Saver(tf.global_variables())

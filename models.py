@@ -136,11 +136,11 @@ class MLP(Model):
 
 
 class GCN(Model):
-    def __init__(self, placeholders, input_dim, **kwargs):
+    def __init__(self, placeholders, layer_sizes, **kwargs):
         super(GCN, self).__init__(**kwargs)
 
         self.inputs = placeholders['features']
-        self.input_dim = input_dim
+        self.input_dim = layer_sizes[0]
         # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
         self.output_dim = placeholders['labels'].get_shape().as_list()[1]
         self.placeholders = placeholders
@@ -165,19 +165,19 @@ class GCN(Model):
     def _build(self):
 
         self.layers.append(GraphConvolution(input_dim=self.input_dim,
-                                            output_dim=FLAGS.hidden1,
+                                            output_dim=self.layer_sizes[1],
                                             placeholders=self.placeholders,
                                             act=tf.nn.relu,
                                             dropout=True,
                                             sparse_inputs=True,
                                             logging=self.logging))
 
-        self.layers.append(GraphConvolution(input_dim=self.input_dim,
+        self.layers.append(GraphConvolution(input_dim=self.layer_sizes[1],
                                             output_dim=self.output_dim,
                                             placeholders=self.placeholders,
                                             act=lambda x: x,
                                             dropout=True,
-                                            sparse_inputs=True,
+                                            sparse_inputs=False,
                                             logging=self.logging))
 
     def predict(self):

@@ -58,17 +58,6 @@ def _add_loss_summaries(loss):
 
   return loss_averages_op
 
-def create_encoding_weights(layer_size, name_prefix):
-  encoding_weights = []
-  prev_size = layer_size[0]
-  for i in range(1, len(layer_size)):
-    curr_size = layer_size[i]
-    name = name_prefix + str(i)
-    encoding_weights.append(_variable_on_cpu(name, (prev_size, curr_size), 
-      tf.truncated_normal_initializer(stddev=5e-2, dtype=tf.float32)))
-    prev_size = curr_size
-  return encoding_weights
-
 
 class Autoencoder(Model):
   def __init__(self, placeholders, layer_sizes, tied_weights=True, **kwargs):
@@ -189,48 +178,6 @@ class Autoencoder(Model):
 
 
 
-
-def encode(X):
-  batch_size = X.get_shape()[0]
-  input_len = X.get_shape()[1]
-  
-  encoding_weights = create_encoding_weights(LAYER_SIZE, 'weights')
-
-  encoding_biases = [_variable_on_cpu('biases1', (LAYER_SIZE[1],),
-                                      tf.constant_initializer(0.0)),
-                     _variable_on_cpu('biases2', (LAYER_SIZE[2],), 
-                                      tf.constant_initializer(0.0))]
-  with tf.variable_scope('encode1') as scope:
-    h1 = tf.nn.relu(tf.nn.bias_add(tf.matmul(X, encoding_weights[0]), encoding_biases[0]), name=scope.name + '/hidden1')
-    #h1 = tf.nn.bias_add(tf.matmul(X, encoding_weights[0]), encoding_biases[0])
-    _activation_summary(h1)
-
-  with tf.variable_scope('encode2') as scope:
-    h2 = tf.nn.relu(tf.nn.bias_add(tf.matmul(h1, encoding_weights[1]), encoding_biases[1]),
-        name=scope.name + '/hidden2')
-    _activation_summary(h2)
-
-  gradf = tf.gradients(h2, X)
-  
-  return h2, encoding_weights, encoding_biases, gradf
-
-def decode(h, input_len, encoding_weights = None):
-
-  if not encoding_weights:
-    encoding_weights = create_encoding_weights(LAYER_SIZE, 'decoding_weights')
-  
-  with tf.variable_scope('decode1') as scope:
-    b1 = _variable_on_cpu('biases1', [LAYER_SIZE[1]], tf.constant_initializer(0.0))
-    h1 = tf.nn.relu(tf.nn.bias_add(tf.matmul(h, tf.transpose(encoding_weights[1])), b1), name=scope.name + '/hidden3')
-    #h1 = tf.nn.bias_add(tf.matmul(h, tf.transpose(encoding_weights[1])), b1)
-    _activation_summary(h1)
-
-  with tf.variable_scope('decode2') as scope:
-    b2 = _variable_on_cpu('biases2', [input_len], tf.constant_initializer(0.0))
-    h2 = tf.nn.bias_add(tf.matmul(h1, tf.transpose(encoding_weights[0])), b2, name = scope.name + '/hidden4')
-    _activation_summary(h2)
-
-  return h2
 
 def encode_neighbors(neighbors, encoding_weights, encoding_biases):
   """Encode neighbors
