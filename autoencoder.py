@@ -1,9 +1,14 @@
 from __future__ import division, print_function, absolute_import
 from models import Model
+from layers import Dense
+from inits import glorot
 
 import numpy as np
 import os
 import tensorflow as tf
+
+flags = tf.app.flags
+FLAGS = flags.FLAGS
 
 LAYER_SIZE = [50, 20, 10]
 INIT_LR = 1e-3
@@ -27,18 +32,6 @@ def _variable_on_cpu(name, shape, initializer):
   return var
 
 
-
-def _activation_summary(x):
-  """Helper to create summaries for activations.
-    Creates a summary that provides a histogram of activations.
-    Creates a summary that measures the sparsity of activations.
-
-  Args:
-    x: Tensor
-  """
-  tensor_name = x.op.name
-  tf.summary.histogram('activations', x)
-  tf.summary.scalar('/sparsity', tf.nn.zero_fraction(x))
 
 def _add_loss_summaries(loss):
   """Add summaries for losses in CIFAR-10 model.
@@ -87,14 +80,16 @@ class Autoencoder(Model):
           (drop probability), 'weight_decay' (decay weights for regularization).
       layer_sizes: the feature dimensions for input, hidden layers and output.
     """
-    super(GCN, self).__init__(**kwargs)
+    super(Autoencoder, self).__init__(**kwargs)
 
     self.inputs = placeholders['features']
-    self.input_dim = self.inputs.get_shape()[1] 
+    self.input_dim = layer_sizes[0]
     self.output_dim = self.input_dim
     self.placeholders = placeholders
     self.layer_sizes = layer_sizes
     self.embedding_layer_idx = (len(layer_sizes) - 1) // 2
+    self.global_step = tf.Variable(0, trainable=False)
+    self.logging = True
 
     self.optimizer = tf.train.AdamOptimizer(learning_rate=FLAGS.learning_rate)
 
@@ -138,6 +133,7 @@ class Autoencoder(Model):
     #y_tiled = tf.tile(inferred, 
   
     tf.summary.scalar(l2_loss.name, l2_loss)
+    self.loss = l2_loss
     return l2_loss
 
   def _accuracy(self):
@@ -146,24 +142,50 @@ class Autoencoder(Model):
 
   def _build(self):
 
-    encode1 = Dense(input_dim=self.input_dim,
-                              output_dim=self.layer_sizes[1],
-                              placeholders=self.placeholders,
-                              act=tf.nn.relu,
-                              dropout=self.placeholders['dropout'],
-                              logging=self.logging)
-    self.layers.append(encode1)
-    weights1 = tf.transpose(encode1.vars['weights'])
-    
+    weights1 = glorot([self.input_dim, self.layer_sizes[1]], name='weights')
+
+    self.layers.append(Dense(input_dim=self.input_dim,
+                             output_dim=self.layer_sizes[1],
+                             placeholders=self.placeholders,
+                             act=tf.nn.relu,
+                             dropout=False,
+                             logging=self.logging))
+
+    weights1_decode = tf.transpose(weights1)
     self.layers.append(Dense(input_dim=self.layer_sizes[1],
                              output_dim=self.output_dim,
                              placeholders=self.placeholders,
                              act=lambda x: x,
-                             dropout=self.placeholders['dropout'],
-                             shared_weights=weights1,
+                             dropout=False,
+                             shared_weights=weights1_decode,
                              logging=self.logging))
 
+  def _train(self):
+    """ Train autoencoder
+  
+    Returns:
+      train_op: op for training.
+    """
+    
+    #loss_averages_op = _add_loss_summaries(self.loss)
+  
+    #with tf.control_dependencies([loss_averages_op]):
+    lr = tf.train.exponential_decay(FLAGS.learning_rate, self.global_step, 1e4, 0.9, name='lr')
+    opt = tf.train.AdamOptimizer(learning_rate=lr, epsilon=1e-2)
+    grads = opt.compute_gradients(self.loss)
+    apply_grad_op = opt.apply_gradients(grads, global_step=self.global_step)
+  
+    for grad, var in grads:
+      if grad is not None:
+        tf.summary.histogram(var.op.name + '/gradients', grad)
+  
+    variable_averages = tf.train.ExponentialMovingAverage(0.9, self.global_step)
+    variable_averages_op = variable_averages.apply(tf.trainable_variables())
 
+    with tf.control_dependencies([apply_grad_op, variable_averages_op]):
+      train_op = tf.no_op(name='train')
+  
+    return train_op
 
 
 
@@ -235,39 +257,4 @@ def encode_neighbors(neighbors, encoding_weights, encoding_biases):
 
 
 
-
-def train(loss, global_step):
-  """ Train autoencoder
-
-  Args:
-    total_loss: Total loss from loss().
-    global_step: Integer Variable counting the number of training steps processed.
-
-  Returns:
-    train_op: op for training.
-  """
-  
-  #loss_averages_op = _add_loss_summaries(loss)
-
-  #with tf.control_dependencies([loss_averages_op]):
-  lr = tf.train.exponential_decay(INIT_LR, global_step, 1e4, 0.9, name='lr')
-  opt = tf.train.AdamOptimizer(learning_rate=lr, epsilon=1e-2)
-  grads = opt.compute_gradients(loss)
-  apply_grad_op = opt.apply_gradients(grads, global_step=global_step)
-
-  # histograms for vars and their grads
-  for var in tf.trainable_variables():
-    tf.summary.histogram(var.op.name, var)
-
-  for grad, var in grads:
-    if grad is not None:
-      tf.summary.histogram(var.op.name + '/gradients', grad)
-
-  variable_averages = tf.train.ExponentialMovingAverage(0.9, global_step)
-  variable_averages_op = variable_averages.apply(tf.trainable_variables())
-
-  with tf.control_dependencies([apply_grad_op, variable_averages_op]):
-    train_op = tf.no_op(name='train')
-
-  return train_op
 

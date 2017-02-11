@@ -33,7 +33,7 @@ tf.app.flags.DEFINE_string('node_label_filename', 'group-edges.csv',
                            """Name of file containing node labels.""")
 tf.app.flags.DEFINE_string('node_label_delimiter', ',',
                            """Delimiter of node label file.""")
-tf.app.flags.DEFINE_integer('receptive_field_size', 50,
+tf.app.flags.DEFINE_integer('receptive_field_size', 5,
                            """Size of receptive field around each node.""")
 tf.app.flags.DEFINE_string('receptive_field_path', 'rf.txt',
                            """Saved features.""")
@@ -42,6 +42,7 @@ tf.app.flags.DEFINE_boolean('continue_receptive_field', False, """Continue featu
 # training params
 tf.app.flags.DEFINE_integer('batch_size', 30, """Batch size.""")
 tf.app.flags.DEFINE_float('weight_decay', 0.0000, """Weight decay for regularization.""")
+tf.app.flags.DEFINE_float('learning_rate', 0.001, """Initial learning rate.""")
 
 NUM_EPOCHS = 40
 GPU_MEM_FRACTION = 0.5
@@ -111,18 +112,23 @@ def create_batch(G, randperm, batch_idx):
 
 
 def train(G):
-  global_step = tf.Variable(0, trainable=False)
   
   n = nx.number_of_nodes(G)
   nodes = G.nodes()
 
   X = tf.placeholder('float', [None, FLAGS.receptive_field_size], 'input')
-  reg_multiplier = tf.placeholder('float', (), 'reg')
-  h, weights, biases, gradf = ae.encode(X)
-  recon_x = ae.decode(h, X.get_shape()[1], weights)
+  wd = tf.placeholder('float', [], 'weight_decay')
+  dropout = tf.placeholder('float', [], 'dropout')
+
+  layer_sizes = [5, 5, 5]
+  placeholders = {'features': X, 'weight_decay': wd, 'dropout': dropout}
+  model = Autoencoder(placeholders, layer_sizes, tied_weights=True)
+  #h, weights, biases, gradf = ae.encode(X)
+  #recon_x = ae.decode(h, X.get_shape()[1], weights)
+
   # gradient wrt input for constrastive regularization
-  loss = ae.loss(recon_x, X, gradf, reg_multiplier)
-  train_op = ae.train(loss, global_step)
+  #loss = ae.loss(recon_x, X, gradf, reg_multiplier)
+  #train_op = ae.train(loss, global_step)
   
   init = tf.global_variables_initializer()
   saver = tf.train.Saver(tf.global_variables())
@@ -166,9 +172,6 @@ def train(G):
   nodes = G.nodes()
   step = 0
 
-  layer_sizes = [50, 20, 10]
-  placeholders = {'features': X, 'weight_decay': wd, 'dropout': dropout}
-  model = Autoencoder(placeholders, layer_sizes, tied_weights=True)
 
   for epoch in range(NUM_EPOCHS):
     print('Epoch: %d' % epoch)

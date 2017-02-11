@@ -1,4 +1,4 @@
-from gcn.inits import *
+from inits import *
 import tensorflow as tf
 
 flags = tf.app.flags
@@ -6,6 +6,19 @@ FLAGS = flags.FLAGS
 
 # global unique layer ID dictionary for layer name assignment
 _LAYER_UIDS = {}
+
+
+def _activation_summary(x):
+  """Helper to create summaries for activations.
+    Creates a summary that provides a histogram of activations.
+    Creates a summary that measures the sparsity of activations.
+
+  Args:
+    x: Tensor
+  """
+  tensor_name = x.op.name
+  tf.summary.histogram(tensor_name + '/activations', x)
+  tf.summary.scalar('/sparsity', tf.nn.zero_fraction(x))
 
 
 def get_layer_uid(layer_name=''):
@@ -74,18 +87,19 @@ class Layer(object):
                 tf.summary.histogram(self.name + '/inputs', inputs)
             outputs = self._call(inputs)
             if self.logging:
-                tf.summary.histogram(self.name + '/outputs', outputs)
+                _activation_summary(outputs)
             return outputs
 
     def _log_vars(self):
         for var in self.vars:
-            tf.summary.histogram(self.name + '/vars/' + var, self.vars[var])
+            tf.summary.histogram(self.name + '_vars/' + var, self.vars[var])
 
 
 class Dense(Layer):
     """Dense layer."""
     def __init__(self, input_dim, output_dim, placeholders, dropout=0., sparse_inputs=False,
-                 act=tf.nn.relu, shared_weights=None, bias=False, featureless=False, **kwargs):
+                 act=tf.nn.relu, shared_weights=None, bias=False, featureless=False, 
+                 **kwargs):
       """ Constructor
       Args:
         shared_weights: weights tensor if using shared weights; None (by default) otherwise.
@@ -103,10 +117,12 @@ class Dense(Layer):
       self.bias = bias
 
       # helper variable for sparse dropout
-      self.num_features_nonzero = placeholders['num_features_nonzero']
+      # when sparse_input is True
+      if sparse_inputs:
+        self.num_features_nonzero = placeholders['num_features_nonzero']
 
       with tf.variable_scope(self.name + '_vars'):
-        if not shared_weights:
+        if shared_weights is None:
           self.vars['weights'] = glorot([input_dim, output_dim],
                                         name='weights')
         else:
@@ -139,7 +155,7 @@ class Dense(Layer):
 
 class GraphConvolution(Layer):
     """Graph convolution layer."""
-    def __init__(self, input_dim, output_dim, placeholders, dropout=0.,
+    def __init__(self, input_dim, output_dim, placeholders, dropout=True,
                  sparse_inputs=False, act=tf.nn.relu, bias=False,
                  featureless=False, **kwargs):
         super(GraphConvolution, self).__init__(**kwargs)

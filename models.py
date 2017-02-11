@@ -58,7 +58,10 @@ class Model(object):
         self._loss()
         self._accuracy()
 
-        self.opt_op = self.optimizer.minimize(self.loss)
+        self.opt_op = self._train()
+
+    def _train(self):
+        return self.optimizer.minimize(self.loss)
 
     def predict(self):
         pass
