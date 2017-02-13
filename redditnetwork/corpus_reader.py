@@ -231,6 +231,5 @@ class SpacyComments():
                         continue
                     doc = Doc(self._vocab).from_bytes(byte_string)
                     comment_info["doc"] = doc
-                    comment_info['text'] = ''
                     comment_info["text"] = self._text_from_doc(doc)
                     yield comment_info

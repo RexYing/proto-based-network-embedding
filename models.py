@@ -1,3 +1,4 @@
+import init
 from layers import *
 from metrics import *
 
@@ -183,5 +184,40 @@ class GCN(Model):
     def predict(self):
         return tf.nn.softmax(self.outputs)
 
+class GCN_multipartite(GCN):
+  def __init__(self, **kwargs):
+    super(GCN_multipartite, self).__init__(**kwargs)
+    
+    # actually the weights for computing the agg weights
+    self.agg_weights = init.glorot(self.input_dim, 1, name='agg_weights')
 
+  def aggregate(inputs):
+    
+    # normalize (or softmax)
+    self.weights_activations = [self.inputs]
+    for layer in self.agg_layers:
+      hidden = layer(self.weights_activations[-1])
+      self.activations.append(hidden)
+      self.outputs = self.weights_activations[-1]
+    norm_agg_weights = tf.nn.l2_normalize(self.weights_activations[-1], dim=1)
+    return tf.matmul(self.inputs, norm_agg_weights)
+
+  def _build(self):
+    super(GCN_multipartite, self)._build()
+
+    self.agg_layers.append(Dense(input_dim=self.input_dim,
+                                 output_dim=5,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 logging=self.logging))
+
+    self.agg_layers.append(Dense(input_dim=5,
+                                 output_dim=1,
+                                 placeholders=self.placeholders,
+                                 act=tf.nn.relu,
+                                 dropout=True,
+                                 logging=self.logging))
+
+    self.inputs = aggregate(self.inputs)
 
