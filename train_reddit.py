@@ -11,6 +11,7 @@ import pandas as pd
 from models import GCN_multipartite
 from redditnetwork import constants
 from redditnetwork.network_extractor import extract_week_network
+import utils
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -22,10 +23,13 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 
 # training params
+tf.app.flags.DEFINE_integer('epochs', 200, """Number of epochs to train.""")
 tf.app.flags.DEFINE_integer('batch_size', 30, """Batch size.""")
 tf.app.flags.DEFINE_float('weight_decay', 0.0000, """Weight decay for regularization.""")
 tf.app.flags.DEFINE_float('learning_rate', 0.001, """Initial learning rate.""")
 tf.app.flags.DEFINE_float('dropout', 0.5, 'Dropout rate (1 - keep probability).')
+
+GPU_MEM_FRACTION = 0.5
 
 POST_TYPE = 'post'
 COMMENT_TYPE = 'comment'
@@ -114,7 +118,8 @@ def extract_user_features_simple(G, userid, max_deg):
 # Define model evaluation function
 def evaluate(features, support, labels, mask, placeholders):
   t_test = time.time()
-  feed_dict_val = construct_feed_dict(features, support, labels, mask, placeholders)
+  feed_dict_val = utils.construct_feed_dict(features, support, labels, mask, placeholders,
+      sparse_inputs=False)
   outs_val = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
   return outs_val[0], outs_val[1], (time.time() - t_test)
 
@@ -144,7 +149,7 @@ def train(G):
   for node in userG.nodes():
     features.append(extract_user_features_simple(G, node, max_deg))
   features = np.stack(features, axis=0)
-  print(features.shape)
+  print('Feature dimensions: ', features.shape)
 
   # data split
   n = userG.number_of_nodes()
@@ -181,22 +186,25 @@ def train(G):
   config.gpu_options.allow_growth = True
   config.gpu_options.per_process_gpu_memory_fraction = GPU_MEM_FRACTION
 
+  init = tf.global_variables_initializer()
+  saver = tf.train.Saver(tf.global_variables())
+  summary_op = tf.summary.merge_all()
+
   # Start running operations on the Graph.
   sess = tf.Session(config=config)
   sess.run(init)
-
-  # init variables
-  sess.run(tf.global_variables_initializer())
+  summary_writer = tf.summary.FileWriter(FLAGS.train_log_dir, sess.graph)
   
   cost_val = []
 
   # Train model
+  print('Training...')
   for epoch in range(FLAGS.epochs):
 
     t = time.time()
     # Construct feed dictionary
-    feed_dict = construct_feed_dict(features, support, y_train, train_mask,
-        placeholders)
+    feed_dict = utils.construct_feed_dict(features, [utils.preprocess_adj(adj)], train_labels, train_mask,
+        placeholders, sparse_inputs=False)
     feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
     # Training step

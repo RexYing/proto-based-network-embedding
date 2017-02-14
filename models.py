@@ -203,25 +203,25 @@ class GCN_multipartite(GCN):
       Aggregated features of dimension [batch size, feature length].
     """
     
-    # normalize (or softmax)
     dims = tf.shape(self.inputs)
     weights_inputs = tf.reshape(self.inputs, (dims[0] * dims[1], dims[2]))
     self.weights_activations = [weights_inputs]
     for layer in self.agg_layers:
       hidden = layer(self.weights_activations[-1])
       self.activations.append(hidden)
+      print(hidden.get_shape())
     self.outputs = self.weights_activations[-1]
 
     norm_agg_weights = tf.reshape(self.weights_activations[-1], (dims[0], dims[1], 1))
+    # normalize (or softmax)
     norm_agg_weights = tf.nn.l2_normalize(norm_agg_weights, dim=1)
 
     features_trsp = tf.transpose(self.inputs, perm=[0, 2, 1])
 
-    return tf.matmul(features_trsp, norm_agg_weights)
+    return tf.squeeze(tf.matmul(features_trsp, norm_agg_weights))
 
   def _build(self):
 
-    dims = tf.shape(self.inputs)
     agg_placeholders = {'dropout': self.placeholders['dropout']}
     self.agg_layers.append(Dense(input_dim=self.feature_size,
                                  output_dim=5,
