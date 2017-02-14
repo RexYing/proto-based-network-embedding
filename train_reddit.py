@@ -8,6 +8,7 @@ import tensorflow as tf
 import time
 
 import pandas as pd
+from models import GCN_multipartite
 from redditnetwork import constants
 from redditnetwork.network_extractor import extract_week_network
 
@@ -77,12 +78,14 @@ def comment_raw_feature(G, commentid):
   feature.extend(G.node[commentid]['word_vecs'])
   return feature
 
-def extract_user_features_simple(G, userid):
+def extract_user_features_simple(G, userid, max_deg):
   """ Extract user graph and features for each user.
   Extracted features are based on neighboring posts/comments
 
   Args:
     G: networkx graph with nodes representing comments, posts and users.
+    max_deg: the first dimension of the feature. If the number of comments and posts that the user
+        makes is less than max_degree, pad the remaining rows with zeros.
 
   Returns:
     features: features for each user.
@@ -104,8 +107,9 @@ def extract_user_features_simple(G, userid):
       comment_feat.append(f)
     else:
       print('Unknown type %s' % G.node[neighbor]['type'])
-  
-  return np.concatenate((post_feat, comment_feat), 1)
+  feature = np.concatenate((post_feat, comment_feat), 1)
+  feature = np.pad(feature, ((0, max_deg - feature.shape[0]), (0, 0)), 'constant')
+  return feature
 
 # Define model evaluation function
 def evaluate(features, support, labels, mask, placeholders):
@@ -118,38 +122,52 @@ def train(G):
   print(G.graph)
   print('Extracting user graph...')
   userG = user_graph(G)
-  adj = nx.adjacency_matrix(userG)
-
-  print('Extracting user features...')
-  features = np.array(extract_user_features_simple(G, userG.nodes()[0]))
-  for node in userG.nodes()[1:]:
-    features = np.vstack((features, extract_user_features_simple(G, node)))
-
 
   # labels
+  print('Obtaining labels...')
   future = pd.read_csv(constants.DATA_HOME + "user_scores/{}_2014_wf{:02d}.csv".format("politics", 1))
   future = future.set_index("user")
-  future['label'] = np.sign(future["sum"] - np.percentile(future["sum"], 90)-10e10)
+  future['label'] = np.sign(future["sum"] - np.percentile(future["sum"], 90) - 1e-10)
   labels = []
   for userid in userG.nodes():
-    labels.append(future.loc[userid]['label'])
+    if userid in future.index:
+      labels.append(future.loc[userid]['label'])
+    else:
+      #print('%s does not have label.' % userid)
+      userG.remove_node(userid)
+  labels = np.array(labels, dtype=np.int)
 
+  print('Extracting user features...')
+  max_deg = max(G.degree(userG.nodes()).values())
+  print('Max user degree: ', max_deg)
+  features = []
+  for node in userG.nodes():
+    features.append(extract_user_features_simple(G, node, max_deg))
+  features = np.stack(features, axis=0)
+  print(features.shape)
+
+  # data split
   n = userG.number_of_nodes()
   n1 = int(math.ceil(n * 0.7))
   n2 = int(math.ceil(n * 0.8))
-  train_mask = [1 if i < n1 else 0 for i in range(n)]
-  val_mask = [1 if n1 <= i < n2 else 0 for i in range(n)]
-  test_mask = [1 if n2 <= i else 0 for i in range(n)]
-  train_labels = labels[:n1]
-  val_labels = labels[n1:n2]
-  test_labels = labels[n2:]
+  train_mask = np.array([1 if i < n1 else 0 for i in range(n)])
+  val_mask = np.array([1 if n1 <= i < n2 else 0 for i in range(n)])
+  test_mask = np.array([1 if n2 <= i else 0 for i in range(n)])
+
+  train_labels = np.zeros((n, 2))
+  train_labels[np.arange(n1), labels[:n1]] = 1
+  val_labels = np.zeros((n, 2))
+  val_labels[np.arange(n1, n2), labels[n1:n2]] = 1
+  test_labels = np.zeros((n, 2))
+  test_labels[np.arange(n2, n), labels[n2:]] = 1
+
+  adj = nx.adjacency_matrix(userG)
 
   # Define placeholders
   placeholders = {
-      'support': [tf.sparse_placeholder(tf.float32) for _ in range(num_supports)],
-      'features': tf.sparse_placeholder(tf.float32, shape=tf.constant(features[2],
-          dtype=tf.int64)),
-      'labels': tf.placeholder(tf.float32, shape=(None, y_train.shape[1])),
+      'support': [tf.sparse_placeholder(tf.float32)],
+      'features': tf.placeholder(tf.float32, shape=(None, features.shape[1], features.shape[2])),
+      'labels': tf.placeholder(tf.float32, shape=(None, train_labels.shape[1])),
       'labels_mask': tf.placeholder(tf.int32),
       'dropout': tf.placeholder_with_default(0., shape=()),
   }
