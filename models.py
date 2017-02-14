@@ -1,4 +1,3 @@
-import init
 from layers import *
 from metrics import *
 
@@ -137,11 +136,13 @@ class MLP(Model):
 
 
 class GCN(Model):
-    def __init__(self, placeholders, layer_sizes, **kwargs):
+    def __init__(self, placeholders, layer_sizes, sparse_inputs=True, **kwargs):
         super(GCN, self).__init__(**kwargs)
 
         self.inputs = placeholders['features']
         self.input_dim = layer_sizes[0]
+        self.sparse_inputs = sparse_inputs
+        self.layer_sizes = layer_sizes
         # self.input_dim = self.inputs.get_shape().as_list()[1]  # To be supported in future Tensorflow versions
         self.output_dim = placeholders['labels'].get_shape().as_list()[1]
         self.placeholders = placeholders
@@ -170,7 +171,7 @@ class GCN(Model):
                                             placeholders=self.placeholders,
                                             act=tf.nn.relu,
                                             dropout=True,
-                                            sparse_inputs=True,
+                                            sparse_inputs=self.sparse_inputs,
                                             logging=self.logging))
 
         self.layers.append(GraphConvolution(input_dim=self.layer_sizes[1],
@@ -178,46 +179,65 @@ class GCN(Model):
                                             placeholders=self.placeholders,
                                             act=lambda x: x,
                                             dropout=True,
-                                            sparse_inputs=False,
+                                            sparse_inputs=self.sparse_inputs,
                                             logging=self.logging))
 
     def predict(self):
         return tf.nn.softmax(self.outputs)
 
 class GCN_multipartite(GCN):
-  def __init__(self, **kwargs):
-    super(GCN_multipartite, self).__init__(**kwargs)
-    
-    # actually the weights for computing the agg weights
-    self.agg_weights = init.glorot(self.input_dim, 1, name='agg_weights')
+  def __init__(self, placeholders, layer_sizes, **kwargs):
+    # actually the weights for computing the aggregate weights
+    self.agg_layers = []
+    self.feature_size = layer_sizes[0]
 
-  def aggregate(inputs):
+    super(GCN_multipartite, self).__init__(placeholders, layer_sizes, sparse_inputs=False, **kwargs)
+
+  def aggregate(self, inputs):
+    """ Aggregate features of neighbors using learned weights.
+
+    Args:
+      inputs: input features of dimension [batch size, max degree, feature length]
+
+    Returns:
+      Aggregated features of dimension [batch size, feature length].
+    """
     
     # normalize (or softmax)
-    self.weights_activations = [self.inputs]
+    dims = tf.shape(self.inputs)
+    weights_inputs = tf.reshape(self.inputs, (dims[0] * dims[1], dims[2]))
+    self.weights_activations = [weights_inputs]
     for layer in self.agg_layers:
       hidden = layer(self.weights_activations[-1])
       self.activations.append(hidden)
-      self.outputs = self.weights_activations[-1]
-    norm_agg_weights = tf.nn.l2_normalize(self.weights_activations[-1], dim=1)
-    return tf.matmul(self.inputs, norm_agg_weights)
+    self.outputs = self.weights_activations[-1]
+
+    norm_agg_weights = tf.reshape(self.weights_activations[-1], (dims[0], dims[1], 1))
+    norm_agg_weights = tf.nn.l2_normalize(norm_agg_weights, dim=1)
+
+    features_trsp = tf.transpose(self.inputs, perm=[0, 2, 1])
+
+    return tf.matmul(features_trsp, norm_agg_weights)
 
   def _build(self):
-    super(GCN_multipartite, self)._build()
 
-    self.agg_layers.append(Dense(input_dim=self.input_dim,
+    dims = tf.shape(self.inputs)
+    agg_placeholders = {'dropout': self.placeholders['dropout']}
+    self.agg_layers.append(Dense(input_dim=self.feature_size,
                                  output_dim=5,
-                                 placeholders=self.placeholders,
+                                 placeholders=agg_placeholders,
                                  act=tf.nn.relu,
                                  dropout=True,
                                  logging=self.logging))
 
     self.agg_layers.append(Dense(input_dim=5,
                                  output_dim=1,
-                                 placeholders=self.placeholders,
+                                 placeholders=agg_placeholders,
                                  act=tf.nn.relu,
                                  dropout=True,
                                  logging=self.logging))
 
-    self.inputs = aggregate(self.inputs)
+    self.inputs = self.aggregate(self.inputs)
+
+    super(GCN_multipartite, self)._build()
 

@@ -172,7 +172,8 @@ class GraphConvolution(Layer):
         self.bias = bias
 
         # helper variable for sparse dropout
-        self.num_features_nonzero = placeholders['num_features_nonzero']
+        if sparse_inputs:
+          self.num_features_nonzero = placeholders['num_features_nonzero']
 
         with tf.variable_scope(self.name + '_vars'):
             for i in range(len(self.support)):
