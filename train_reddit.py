@@ -138,7 +138,7 @@ def evaluate(sess, model, features, support, labels, mask, placeholders):
   t_test = time.time()
   feed_dict_val = utils.construct_feed_dict(features, support, labels, mask, placeholders,
       sparse_inputs=False)
-  outs_val = sess.run([model.loss, model.accuracy, model.output, model.y_pred], feed_dict=feed_dict_val)
+  outs_val = sess.run([model.loss, model.accuracy, model.y_pred], feed_dict=feed_dict_val)
   return outs_val[0], outs_val[1], outs_val[2], (time.time() - t_test)
 
 def train(G):
@@ -159,6 +159,8 @@ def train(G):
       #print('%s does not have label.' % userid)
       userG.remove_node(userid)
   labels = np.array(labels, dtype=np.int)
+  # convert to 0/1 labels
+  labels = [0 if l < 0 else 1 for l in labels]
 
   print('Extracting user features...')
   max_deg = max(G.degree(userG.nodes()).values())
@@ -247,7 +249,7 @@ def train(G):
     cost, acc, y_pred, duration_val = evaluate(sess, model, features, support, val_labels, val_mask, placeholders)
     cost_val.append(cost)
 
-    y_true = np.argmax(test_label,1)
+    y_true = np.argmax(val_labels,1)
     y_pred = y_pred[n1:n2]
     y_true = y_true[n1:n2]
     precision = sk.metrics.precision_score(y_true, y_pred)
@@ -258,9 +260,10 @@ def train(G):
     print("Epoch:", '%04d' % (epoch + 1), 
           "train_loss=", "{:.5f}".format(outs[1]),
           "train_acc=", "{:.5f}".format(outs[2]), 
+          "train_time=", "{:.5f}".format(duration),
           "val_acc=", "{:.5f}".format(acc), 
           'val_f1=', '{:.5f}'.format(f1),
-          "time=", "{:.5f}".format(duration))
+          "val_time=", "{:.5f}".format(duration_val))
 
 
     summary_str = sess.run(summary_op, feed_dict=feed_dict)
