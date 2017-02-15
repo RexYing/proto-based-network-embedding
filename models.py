@@ -163,6 +163,7 @@ class GCN(Model):
     def _accuracy(self):
         self.accuracy = masked_accuracy(self.outputs, self.placeholders['labels'],
                                         self.placeholders['labels_mask'])
+        self.y_pred = tf.argmax(self.predict(), 1)
 
     def _build(self):
 
@@ -208,9 +209,7 @@ class GCN_multipartite(GCN):
     self.weights_activations = [weights_inputs]
     for layer in self.agg_layers:
       hidden = layer(self.weights_activations[-1])
-      self.activations.append(hidden)
-      print(hidden.get_shape())
-    self.outputs = self.weights_activations[-1]
+      self.weights_activations.append(hidden)
 
     norm_agg_weights = tf.reshape(self.weights_activations[-1], (dims[0], dims[1], 1))
     # normalize (or softmax)

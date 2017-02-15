@@ -4,10 +4,11 @@ import math
 import networkx as nx
 import numpy as np
 import os
+import pandas as pd
+import sklearn as sk
 import tensorflow as tf
 import time
 
-import pandas as pd
 from models import GCN_multipartite
 from redditnetwork import constants
 from redditnetwork.network_extractor import extract_week_network
@@ -82,7 +83,7 @@ def comment_raw_feature(G, commentid):
   feature.extend(G.node[commentid]['word_vecs'])
   return feature
 
-def extract_user_features_simple(G, userid, max_deg):
+def extract_user_features_simple(G, userid, max_deg, neighbor_dict=None):
   """ Extract user graph and features for each user.
   Extracted features are based on neighboring posts/comments
 
@@ -90,6 +91,7 @@ def extract_user_features_simple(G, userid, max_deg):
     G: networkx graph with nodes representing comments, posts and users.
     max_deg: the first dimension of the feature. If the number of comments and posts that the user
         makes is less than max_degree, pad the remaining rows with zeros.
+    neighbor_dict: dictionary mapping post/comment ids to a tuple of index and 
 
   Returns:
     features: features for each user.
@@ -100,28 +102,44 @@ def extract_user_features_simple(G, userid, max_deg):
   comment_feat_len = G.graph['comment_feats']['score'] + G.graph['comment_feats']['length'] + \
       G.graph['comment_feats']['post_time_offset'] + G.graph['comment_feats']['word_vec']
   comment_feat = []
+  feature_size = post_feat_len + comment_feat_len
+
+  feature_idx = []
   for neighbor in G.neighbors(userid):
-    if G.node[neighbor]['type'] == POST_TYPE: 
+    if neighbor_dict is not None and neighbor in neighbor_dict:
+      feature_idx.append(neighbor_dict[neighbor][0])
+    elif G.node[neighbor]['type'] == POST_TYPE: 
       f = post_raw_feature(G, neighbor)
       post_feat.append(f)
       comment_feat.append([0.0] * comment_feat_len)
+      if neighbor_dict is not None:
+        feature_idx.append(len(neighbor_dict))
+        neighbor_dict[neighbor] = (len(neighbor_dict), np.concatenate((f, [0.0] * comment_feat_len)))
     elif G.node[neighbor]['type'] == COMMENT_TYPE:
       f = comment_raw_feature(G, neighbor)
       post_feat.append([0.0] * post_feat_len)
       comment_feat.append(f)
+      if neighbor_dict is not None:
+        feature_idx.append(len(neighbor_dict))
+        neighbor_dict[neighbor] = (len(neighbor_dict), np.concatenate(([0.0] * post_feat_len, f)))
     else:
       print('Unknown type %s' % G.node[neighbor]['type'])
   feature = np.concatenate((post_feat, comment_feat), 1)
   feature = np.pad(feature, ((0, max_deg - feature.shape[0]), (0, 0)), 'constant')
-  return feature
+  feature_idx = np.pad(feature_idx, (0, max_deg - len(feature_idx)), 'constant')
+  #print(feature_idx)
+  if neighbor_dict is None:
+    return feature_size, feature
+  else:
+    return feature_size, feature_idx
 
 # Define model evaluation function
-def evaluate(features, support, labels, mask, placeholders):
+def evaluate(sess, model, features, support, labels, mask, placeholders):
   t_test = time.time()
   feed_dict_val = utils.construct_feed_dict(features, support, labels, mask, placeholders,
       sparse_inputs=False)
-  outs_val = sess.run([model.loss, model.accuracy], feed_dict=feed_dict_val)
-  return outs_val[0], outs_val[1], (time.time() - t_test)
+  outs_val = sess.run([model.loss, model.accuracy, model.output, model.y_pred], feed_dict=feed_dict_val)
+  return outs_val[0], outs_val[1], outs_val[2], (time.time() - t_test)
 
 def train(G):
   print(G.graph)
@@ -146,9 +164,19 @@ def train(G):
   max_deg = max(G.degree(userG.nodes()).values())
   print('Max user degree: ', max_deg)
   features = []
+  neighbor_dict = {}
+  feature_size = 0
   for node in userG.nodes():
-    features.append(extract_user_features_simple(G, node, max_deg))
+    #feature_size, feature_idx = extract_user_features_simple(G, node, max_deg, neighbor_dict)
+    feature_size, feature_idx = extract_user_features_simple(G, node, max_deg)
+    features.append(feature_idx)
+
+  # a list of all features corresponding to posts/comments
+  #neighbor_features = np.zeros((len(neighbor_dict), feature_size))
+  #for idx, vec in neighbor_dict.values():
+  #  neighbor_features[idx] = vec
   features = np.stack(features, axis=0)
+  #features = np.array(features)
   print('Feature dimensions: ', features.shape)
 
   # data split
@@ -172,6 +200,8 @@ def train(G):
   placeholders = {
       'support': [tf.sparse_placeholder(tf.float32)],
       'features': tf.placeholder(tf.float32, shape=(None, features.shape[1], features.shape[2])),
+      #'features': tf.placeholder(tf.float32, shape=(None, features.shape[1])),
+      #'neighbor_features': tf.placeholder(tf.float32, shape=neighbor_features.shape),
       'labels': tf.placeholder(tf.float32, shape=(None, train_labels.shape[1])),
       'labels_mask': tf.placeholder(tf.int32),
       'dropout': tf.placeholder_with_default(0., shape=()),
@@ -201,24 +231,40 @@ def train(G):
   print('Training...')
   for epoch in range(FLAGS.epochs):
 
-    t = time.time()
+    support = [utils.preprocess_adj(adj)]
     # Construct feed dictionary
-    feed_dict = utils.construct_feed_dict(features, [utils.preprocess_adj(adj)], train_labels, train_mask,
+    feed_dict = utils.construct_feed_dict(features, support, train_labels, train_mask,
         placeholders, sparse_inputs=False)
     feed_dict.update({placeholders['dropout']: FLAGS.dropout})
 
     # Training step
+    start_time = time.time()
     outs = sess.run([model.opt_op, model.loss, model.accuracy], feed_dict=feed_dict)
+    duration = time.time() - start_time
+    print(duration)
 
     # Validation
-    cost, acc, duration = evaluate(features, support, y_val, val_mask, placeholders)
+    cost, acc, y_pred, duration_val = evaluate(sess, model, features, support, val_labels, val_mask, placeholders)
     cost_val.append(cost)
 
+    y_true = np.argmax(test_label,1)
+    y_pred = y_pred[n1:n2]
+    y_true = y_true[n1:n2]
+    precision = sk.metrics.precision_score(y_true, y_pred)
+    recall = sk.metrics.recall_score(y_true, y_pred)
+    f1 = sk.metrics.f1_score(y_true, y_pred)
+
     # Print results
-    print("Epoch:", '%04d' % (epoch + 1), "train_loss=", "{:.5f}".format(outs[1]),
-          "train_acc=", "{:.5f}".format(outs[2]), "val_loss=", "{:.5f}".format(cost),
-          "val_acc=", "{:.5f}".format(acc),
-          "time=", "{:.5f}".format(time.time() - t))
+    print("Epoch:", '%04d' % (epoch + 1), 
+          "train_loss=", "{:.5f}".format(outs[1]),
+          "train_acc=", "{:.5f}".format(outs[2]), 
+          "val_acc=", "{:.5f}".format(acc), 
+          'val_f1=', '{:.5f}'.format(f1),
+          "time=", "{:.5f}".format(duration))
+
+
+    summary_str = sess.run(summary_op, feed_dict=feed_dict)
+    summary_writer.add_summary(summary_str, epoch)
 
 
 def main(argv=None):
